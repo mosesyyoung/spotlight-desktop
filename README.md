@@ -1,8 +1,8 @@
-# Spotlight Downloader
+# Spotlight Desktop
 
-A modern Python implementation of Microsoft Windows Spotlight wallpaper downloader.
+A modern Python implementation of Microsoft Windows Spotlight experience for Linux desktops.
 
-Download beautiful Windows Spotlight wallpapers on Linux/macOS without requiring Windows, .NET, or Mono.
+Download, manage, and automatically apply beautiful Spotlight wallpapers without requiring Windows, .NET, or Mono.
 
 > Inspired by [ORelio/Spotlight-Downloader](https://github.com/ORelio/Spotlight-Downloader)
 
@@ -125,9 +125,9 @@ python3 --version
 ### 2. Clone project
 
 ```bash
-git clone https://github.com/<your-name>/spotlight-downloader.git
+git clone https://github.com/<your-name>/spotlight-desktop.git
 
-cd spotlight-downloader
+cd spotlight-desktop
 ```
 
 ---
@@ -149,7 +149,7 @@ source .venv/bin/activate
 Your shell should become:
 
 ```
-(.venv) user@host:~/spotlight-downloader$
+(.venv) user@host:~/spotlight-desktop$
 ```
 
 ---
