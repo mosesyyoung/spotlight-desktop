@@ -3,7 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import requests
@@ -232,7 +232,9 @@ class ResolutionSelectionTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            downloader = SpotlightDownloader(output, count=1)
+            output_log = io.StringIO()
+            with redirect_stdout(output_log):
+                downloader = SpotlightDownloader(output, count=1)
             downloader.session.close()
             downloader.session = FakeSession([])
             downloader.download_image(
@@ -243,6 +245,10 @@ class ResolutionSelectionTests(unittest.TestCase):
             )
 
             self.assertEqual(downloader.session.calls, [])
+            self.assertIn(
+                "Loaded 1 metadata JSON file into download history",
+                output_log.getvalue(),
+            )
 
     def test_ignores_invalid_metadata_and_downloads_image(self):
         url = "https://cdn.example/new.jpg"
