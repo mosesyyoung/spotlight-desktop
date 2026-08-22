@@ -27,6 +27,7 @@ MAX_STALE_BATCHES = 5
 RESOLUTION_PATTERN = re.compile(r"(?<!\d)(\d{3,5})x(\d{3,5})(?!\d)", re.IGNORECASE)
 WALLPAPER_EXTENSIONS = frozenset((".jpg", ".jpeg", ".png", ".webp"))
 GNOME_BACKGROUND_SCHEMA = "org.gnome.desktop.background"
+__version__ = "1.1.0"
 
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -541,9 +542,14 @@ def positive_int(value):
     return number
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Download Microsoft Windows Spotlight wallpapers"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--output",
@@ -568,7 +574,14 @@ def main():
             "choose a random image from the output directory"
         ),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    if args.set_wallpaper not in (None, ""):
+        try:
+            set_gnome_wallpaper(args.set_wallpaper)
+        except (OSError, RuntimeError) as exc:
+            parser.exit(1, f"Error: {exc}\n")
+        return
 
     app = SpotlightDownloader(
         os.path.expanduser(args.output),

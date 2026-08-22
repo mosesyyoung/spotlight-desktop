@@ -18,6 +18,7 @@ from spotlight_downloader import (  # noqa: E402
     SpotlightDownloader,
     choose_wallpaper,
     landscape_candidates,
+    main,
     resolution_from_url,
     set_gnome_wallpaper,
 )
@@ -84,6 +85,24 @@ def jpeg_bytes(size=(1920, 1080)):
 
 
 class ResolutionSelectionTests(unittest.TestCase):
+    @patch("spotlight_downloader.SpotlightDownloader")
+    @patch("spotlight_downloader.set_gnome_wallpaper")
+    def test_explicit_wallpaper_does_not_start_downloader(
+        self, set_wallpaper, downloader
+    ):
+        main(["--set-wallpaper", "/tmp/wallpaper.jpg"])
+
+        set_wallpaper.assert_called_once_with("/tmp/wallpaper.jpg")
+        downloader.assert_not_called()
+
+    def test_version_option_reports_release_version(self):
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+            main(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn("1.1.0", output.getvalue())
+
     def test_choose_wallpaper_uses_supported_images_only(self):
         with tempfile.TemporaryDirectory() as output:
             output_path = Path(output)
