@@ -19,6 +19,8 @@ from urllib3.util.retry import Retry
 API_URL = "https://fd.api.iris.microsoft.com/v4/api/selection"
 FALLBACK_API_URL = "https://arc.msn.com/v3/Delivery/Placement"
 PREFERRED_RESOLUTION = (3840, 2160)
+API_BATCH_SIZE = 4
+MAX_STALE_BATCHES = 5
 RESOLUTION_PATTERN = re.compile(r"(?<!\d)(\d{3,5})x(\d{3,5})(?!\d)", re.IGNORECASE)
 
 DEFAULT_HEADERS = {
@@ -160,24 +162,54 @@ class SpotlightDownloader:
         temp_file.replace(self.db_file)
 
     def get_images(self):
-        params = {
-            "placement": "88000820",
-            "bcnt": self.count,
-            "country": self.country,
-            "locale": self.locale,
-            "fmt": "json",
-        }
-
         print("Query Spotlight API...")
-        response = self.session.get(API_URL, params=params, timeout=(20, 30))
-        response.raise_for_status()
+        images = []
+        seen_urls = set()
+        stale_batches = 0
 
-        try:
-            items = response.json()["batchrsp"]["items"]
-        except (requests.exceptions.JSONDecodeError, KeyError, TypeError) as exc:
-            raise RuntimeError("Spotlight API returned an unexpected response") from exc
+        while len(images) < self.count and stale_batches < MAX_STALE_BATCHES:
+            batch_count = min(API_BATCH_SIZE, self.count - len(images))
+            params = {
+                "placement": "88000820",
+                "bcnt": batch_count,
+                "country": self.country,
+                "locale": self.locale,
+                "fmt": "json",
+            }
+            response = self.session.get(API_URL, params=params, timeout=(20, 30))
+            response.raise_for_status()
 
-        return self.parse_images(items)
+            try:
+                items = response.json()["batchrsp"]["items"]
+            except (requests.exceptions.JSONDecodeError, KeyError, TypeError) as exc:
+                raise RuntimeError(
+                    "Spotlight API returned an unexpected response"
+                ) from exc
+
+            new_images = []
+            for image in self.parse_images(items):
+                if image["url"] not in seen_urls:
+                    seen_urls.add(image["url"])
+                    new_images.append(image)
+            if new_images:
+                for image in new_images:
+                    images.append(image)
+                    if len(images) == self.count:
+                        break
+                stale_batches = 0
+                if self.count > API_BATCH_SIZE:
+                    print(f"Collected {len(images)}/{self.count} unique images")
+            else:
+                stale_batches += 1
+
+        if len(images) < self.count:
+            print(
+                f"Warning: requested {self.count} images, but only found "
+                f"{len(images)} unique images after {MAX_STALE_BATCHES} "
+                "batches without new results",
+                file=sys.stderr,
+            )
+        return images
 
     def get_lower_resolution_images(self):
         params = {

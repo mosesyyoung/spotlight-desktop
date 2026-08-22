@@ -216,6 +216,9 @@ Parameters:
 | --country | Country code         | CN                          |
 | --locale  | Language locale      | zh-CN                       |
 
+The Spotlight API returns at most four images per request. Larger `--count`
+values are fetched automatically in multiple batches and deduplicated by URL.
+
 ---
 
 ## Metadata
