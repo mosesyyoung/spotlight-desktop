@@ -189,9 +189,7 @@ SpotlightArchive/
 
 ├── 20260822_015300_xxxxxxxx.jpg
 
-├── 20260822_015300_xxxxxxxx.jpg.json
-
-└── downloaded.json
+└── 20260822_015300_xxxxxxxx.jpg.json
 ```
 
 ---
@@ -230,6 +228,10 @@ wallpapers. Legacy placeholder assets are ignored.
 Each image's JSON metadata includes its detected `width`, `height`, `resolution`,
 and `is_4k` values. These dimensions are read from the downloaded image itself,
 not trusted from the filename or API response.
+
+The per-image JSON files also serve as download history. At startup, the
+downloader scans existing metadata and skips known asset URLs when the matching
+image is still present. Invalid metadata is ignored with a warning.
 
 For every downloaded image:
 
@@ -277,10 +279,10 @@ Planned:
 
 #### Download management
 
-- Remove `downloaded.json`
-- Use image metadata JSON files as download history
-- Scan existing metadata before downloading
-- Avoid duplicate downloads
+- [x] Remove `downloaded.json`
+- [x] Use image metadata JSON files as download history
+- [x] Scan existing metadata before downloading
+- [x] Avoid duplicate downloads
 
 #### GNOME integration
 

@@ -135,31 +135,57 @@ class SpotlightDownloader:
         self.session = create_session()
 
         self.output.mkdir(parents=True, exist_ok=True)
-        self.db_file = self.output / "downloaded.json"
-        self.db = self.load_db()
+        self.history = self.load_history()
 
-    def load_db(self):
-        if not self.db_file.exists():
-            return {}
+    @staticmethod
+    def metadata_urls(metadata):
+        """Return every asset URL represented by an image metadata record."""
+        urls = []
+        url = metadata.get("url")
+        if isinstance(url, str):
+            urls.append(url)
 
-        try:
-            data = json.loads(self.db_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"Warning: ignoring invalid {self.db_file}: {exc}", file=sys.stderr)
-            return {}
+        candidates = metadata.get("candidates", [])
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                candidate_url = candidate.get("url")
+                if isinstance(candidate_url, str) and candidate_url not in urls:
+                    urls.append(candidate_url)
+        return urls
 
-        if not isinstance(data, dict):
-            print(f"Warning: ignoring invalid {self.db_file}: expected an object", file=sys.stderr)
-            return {}
-        return data
+    def load_history(self):
+        """Build download history from per-image metadata JSON files."""
+        history = {}
+        for metadata_file in sorted(self.output.glob("*.jpg.json")):
+            try:
+                metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                print(
+                    f"Warning: ignoring invalid {metadata_file}: {exc}",
+                    file=sys.stderr,
+                )
+                continue
 
-    def save_db(self):
-        temp_file = self.db_file.with_suffix(".json.tmp")
-        temp_file.write_text(
-            json.dumps(self.db, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temp_file.replace(self.db_file)
+            if not isinstance(metadata, dict):
+                print(
+                    f"Warning: ignoring invalid {metadata_file}: expected an object",
+                    file=sys.stderr,
+                )
+                continue
+
+            image_file = metadata_file.with_suffix("")
+            if not image_file.is_file():
+                continue
+
+            for url in self.metadata_urls(metadata):
+                history[url] = image_file
+        return history
+
+    def add_to_history(self, metadata, image_file):
+        for url in self.metadata_urls(metadata):
+            self.history[url] = image_file
 
     def get_images(self):
         print("Query Spotlight API...")
@@ -278,15 +304,17 @@ class SpotlightDownloader:
     def download_image(self, item):
         candidates = item.get("candidates") or [make_candidate(item["url"])]
         candidates = [candidate for candidate in candidates if candidate]
+        if not candidates:
+            raise RuntimeError("image has no usable download URL")
+
+        for candidate in candidates:
+            old_file = self.history.get(candidate["url"])
+            if old_file is not None and old_file.is_file():
+                print("Skip:", old_file.name)
+                return
+
         url = candidates[0]["url"]
         sha = hashlib.sha256(url.encode("utf-8")).hexdigest()
-
-        old_record = self.db.get(sha)
-        if isinstance(old_record, dict) and old_record.get("file"):
-            old_file = self.output / old_record["file"]
-            if old_file.is_file():
-                print("Skip:", old_record["file"])
-                return
 
         print("Download:", item.get("title") or url)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -348,9 +376,7 @@ class SpotlightDownloader:
             json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-
-        self.db[sha] = metadata
-        self.save_db()
+        self.add_to_history(metadata, image_file)
 
     def run(self):
         using_lower_resolution = False

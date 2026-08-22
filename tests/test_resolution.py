@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 import requests
@@ -70,6 +71,12 @@ def api_payload(*urls):
             ]
         }
     }
+
+
+def jpeg_bytes(size=(1920, 1080)):
+    image_bytes = io.BytesIO()
+    Image.new("RGB", size).save(image_bytes, format="JPEG")
+    return image_bytes.getvalue()
 
 
 class ResolutionSelectionTests(unittest.TestCase):
@@ -172,8 +179,6 @@ class ResolutionSelectionTests(unittest.TestCase):
         )
 
     def test_download_falls_back_when_4k_asset_fails(self):
-        image_bytes = io.BytesIO()
-        Image.new("RGB", (1920, 1080)).save(image_bytes, format="JPEG")
         item = {
             "url": "https://cdn.example/4k.jpg",
             "title": "Fallback test",
@@ -194,7 +199,7 @@ class ResolutionSelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as output:
             downloader = SpotlightDownloader(output, count=1)
             downloader.session = FakeSession(
-                [FakeResponse(status_code=404), FakeResponse(image_bytes.getvalue())]
+                [FakeResponse(status_code=404), FakeResponse(jpeg_bytes())]
             )
 
             downloader.download_image(item)
@@ -204,6 +209,94 @@ class ResolutionSelectionTests(unittest.TestCase):
             self.assertEqual(metadata["url"], "https://cdn.example/1080.jpg")
             self.assertEqual(metadata["resolution"], "1920x1080")
             self.assertFalse(metadata["is_4k"])
+
+    def test_scans_image_metadata_and_skips_known_candidate(self):
+        primary_url = "https://cdn.example/4k.jpg"
+        fallback_url = "https://cdn.example/1080.jpg"
+
+        with tempfile.TemporaryDirectory() as output:
+            output_path = Path(output)
+            image_file = output_path / "existing.jpg"
+            image_file.write_bytes(b"existing image")
+            (output_path / "existing.jpg.json").write_text(
+                json.dumps(
+                    {
+                        "url": fallback_url,
+                        "candidates": [
+                            {"url": primary_url},
+                            {"url": fallback_url},
+                        ],
+                        "file": image_file.name,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            downloader = SpotlightDownloader(output, count=1)
+            downloader.session.close()
+            downloader.session = FakeSession([])
+            downloader.download_image(
+                {
+                    "url": primary_url,
+                    "candidates": [{"url": primary_url}],
+                }
+            )
+
+            self.assertEqual(downloader.session.calls, [])
+
+    def test_ignores_invalid_metadata_and_downloads_image(self):
+        url = "https://cdn.example/new.jpg"
+
+        with tempfile.TemporaryDirectory() as output:
+            output_path = Path(output)
+            (output_path / "broken.jpg").write_bytes(b"existing image")
+            (output_path / "broken.jpg.json").write_text(
+                "not JSON",
+                encoding="utf-8",
+            )
+
+            warnings = io.StringIO()
+            with redirect_stderr(warnings):
+                downloader = SpotlightDownloader(output, count=1)
+            downloader.session.close()
+            downloader.session = FakeSession([FakeResponse(jpeg_bytes())])
+            downloader.download_image({"url": url})
+
+            self.assertEqual(len(downloader.session.calls), 1)
+            self.assertIn("ignoring invalid", warnings.getvalue())
+
+    def test_new_download_is_added_to_history_without_database_file(self):
+        url = "https://cdn.example/new.jpg"
+
+        with tempfile.TemporaryDirectory() as output:
+            output_path = Path(output)
+            downloader = SpotlightDownloader(output, count=1)
+            downloader.session.close()
+            downloader.session = FakeSession([FakeResponse(jpeg_bytes())])
+
+            downloader.download_image({"url": url})
+            downloader.download_image({"url": url})
+
+            self.assertEqual(len(downloader.session.calls), 1)
+            self.assertEqual(len(list(output_path.glob("*.jpg.json"))), 1)
+            self.assertFalse((output_path / "downloaded.json").exists())
+
+    def test_metadata_without_its_image_does_not_block_redownload(self):
+        url = "https://cdn.example/missing.jpg"
+
+        with tempfile.TemporaryDirectory() as output:
+            output_path = Path(output)
+            (output_path / "missing.jpg.json").write_text(
+                json.dumps({"url": url, "file": "missing.jpg"}),
+                encoding="utf-8",
+            )
+
+            downloader = SpotlightDownloader(output, count=1)
+            downloader.session.close()
+            downloader.session = FakeSession([FakeResponse(jpeg_bytes())])
+            downloader.download_image({"url": url})
+
+            self.assertEqual(len(downloader.session.calls), 1)
 
     def test_run_uses_lower_resolution_api_after_v4_download_failure(self):
         calls = []
