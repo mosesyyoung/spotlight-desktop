@@ -275,145 +275,51 @@ Planned:
 - [x] Prefer 3840x2160 / 4K images
 - [x] Fallback to lower resolution
 
-#### Portrait mode
+#### Download management
 
-Support:
-
-- Landscape wallpaper
-- Portrait wallpaper
-
-#### EXIF metadata
-
-Write:
-
-- Title
-- Copyright
-- Description
-- Location
-
-Example:
-
-```
-image.jpg
-
-EXIF:
-    Title: Lake Tahoe
-    Copyright: NASA
-```
+- Remove `downloaded.json`
+- Use image metadata JSON files as download history
+- Scan existing metadata before downloading
+- Avoid duplicate downloads
 
 #### GNOME integration
 
-Automatically set wallpaper:
+- Automatically set the GNOME wallpaper
+- Support light and dark wallpaper settings
+- Provide a `--set-wallpaper [IMAGE]` CLI option
+
+When `IMAGE` is provided, use that image. When the option is used without an
+image, choose a random image from the output directory.
 
 Example:
 
 ```bash
-gsettings set \
-org.gnome.desktop.background \
-picture-uri \
-file:///path/to/image.jpg
+gsettings set org.gnome.desktop.background picture-uri \
+    file:///path/to/image.jpg
+gsettings set org.gnome.desktop.background picture-uri-dark \
+    file:///path/to/image.jpg
 ```
 
 ---
 
 ### v1.2 Automation
 
-#### systemd timer
+Planned:
 
-Automatic daily download.
+#### Scheduled wallpaper refresh
 
-Example:
+- systemd timer support
+- Hourly update check
+- Download only new wallpapers
+- Automatically set a newly downloaded wallpaper
 
-Every day:
+If new wallpapers are available, download them and set one as the wallpaper.
+If no new wallpaper is available, make no changes.
 
-```
-06:00
-```
+## Future ideas
 
-Download new Spotlight wallpapers automatically.
-
-Architecture:
-
-```
-systemd timer
-       |
-       v
-spotlight-downloader
-       |
-       v
-~/Pictures/SpotlightArchive
-```
-
----
-
-### v1.3 Service Platform
-
-Future:
-
-#### Web UI
-
-A lightweight photo management interface.
-
-Features:
-
-- Browse wallpapers
-- Search metadata
-- Preview images
-- Set wallpaper
-
-Similar experience:
-
-- Synology Photo Station
-- Immich
-
----
-
-#### SQLite database
-
-Replace JSON database.
-
-Store:
-
-```
-images
-├── id
-├── url
-├── sha256
-├── title
-├── copyright
-├── downloaded_time
-└── path
-```
-
-Benefits:
-
-- Faster search
-- Better metadata management
-- Duplicate detection
-
----
-
-#### Docker support
-
-Containerized deployment:
-
-```
-Docker
- |
- spotlight-downloader
- |
- volume
-
- ~/Pictures/SpotlightArchive
-```
-
-Possible usage:
-
-```bash
-docker run \
--v ~/Pictures:/data \
-spotlight-downloader
-```
+- Desktop information overlay
+- GNOME Extension integration
 
 ---
 
