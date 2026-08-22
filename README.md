@@ -21,6 +21,7 @@ Current MVP:
 - ✅ Duplicate detection
 - ✅ Native Python implementation
 - ✅ No Mono / .NET dependency
+- ✅ GNOME light and dark wallpaper integration
 
 Example:
 
@@ -207,15 +208,33 @@ python spotlight_downloader.py \
 
 Parameters:
 
-| Option    | Description          | Default                     |
-| --------- | -------------------- | --------------------------- |
-| --output  | Output directory     | ~/Pictures/SpotlightArchive |
-| --count   | Number of wallpapers | 10                          |
-| --country | Country code         | CN                          |
-| --locale  | Language locale      | zh-CN                       |
+| Option                  | Description          | Default                     |
+| ----------------------- | -------------------- | --------------------------- |
+| --output                | Output directory     | ~/Pictures/SpotlightArchive |
+| --count                 | Number of wallpapers | 10                          |
+| --country               | Country code         | CN                          |
+| --locale                | Language locale      | zh-CN                       |
+| --set-wallpaper [IMAGE] | Set GNOME wallpaper  | Disabled                    |
 
 The Spotlight API returns at most four images per request. Larger `--count`
 values are fetched automatically in multiple batches and deduplicated by URL.
+
+To download wallpapers and set a random image from the output directory for
+both GNOME's light and dark appearances:
+
+```bash
+python spotlight_downloader.py --set-wallpaper
+```
+
+To use a specific image instead:
+
+```bash
+python spotlight_downloader.py --set-wallpaper ~/Pictures/wallpaper.jpg
+```
+
+Wallpaper integration uses GNOME's `picture-uri` and `picture-uri-dark`
+settings. Run the command from an active GNOME desktop session so `gsettings`
+can reach the user's settings database.
 
 ---
 
@@ -286,9 +305,9 @@ Planned:
 
 #### GNOME integration
 
-- Automatically set the GNOME wallpaper
-- Support light and dark wallpaper settings
-- Provide a `--set-wallpaper [IMAGE]` CLI option
+- [x] Automatically set the GNOME wallpaper
+- [x] Support light and dark wallpaper settings
+- [x] Provide a `--set-wallpaper [IMAGE]` CLI option
 
 When `IMAGE` is provided, use that image. When the option is used without an
 image, choose a random image from the output directory.
