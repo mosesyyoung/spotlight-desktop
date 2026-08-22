@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
 import argparse
+import ast
 import hashlib
 import json
 import os
+import random
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,11 +25,91 @@ PREFERRED_RESOLUTION = (3840, 2160)
 API_BATCH_SIZE = 4
 MAX_STALE_BATCHES = 5
 RESOLUTION_PATTERN = re.compile(r"(?<!\d)(\d{3,5})x(\d{3,5})(?!\d)", re.IGNORECASE)
+WALLPAPER_EXTENSIONS = frozenset((".jpg", ".jpeg", ".png", ".webp"))
+GNOME_BACKGROUND_SCHEMA = "org.gnome.desktop.background"
 
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
+
+
+def choose_wallpaper(directory):
+    """Choose a random wallpaper image from a directory."""
+    directory = Path(directory).expanduser()
+    try:
+        images = sorted(
+            path
+            for path in directory.iterdir()
+            if path.is_file() and path.suffix.lower() in WALLPAPER_EXTENSIONS
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot read wallpaper directory {directory}: {exc}"
+        ) from exc
+
+    if not images:
+        raise RuntimeError(f"no wallpaper images found in {directory}")
+    return random.choice(images)
+
+
+def set_gnome_wallpaper(image):
+    """Set an image for both GNOME's light and dark wallpaper settings."""
+    image = Path(image).expanduser().resolve()
+    if not image.is_file():
+        raise RuntimeError(f"wallpaper image does not exist: {image}")
+
+    image_uri = image.as_uri()
+    try:
+        for key in ("picture-uri", "picture-uri-dark"):
+            result = subprocess.run(
+                [
+                    "gsettings",
+                    "set",
+                    GNOME_BACKGROUND_SCHEMA,
+                    key,
+                    image_uri,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if result.stderr.strip():
+                raise RuntimeError(
+                    "GNOME could not commit the wallpaper setting: "
+                    f"{result.stderr.strip()}"
+                )
+
+        for key in ("picture-uri", "picture-uri-dark"):
+            result = subprocess.run(
+                ["gsettings", "get", GNOME_BACKGROUND_SCHEMA, key],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            try:
+                current_uri = ast.literal_eval(result.stdout.strip())
+            except (SyntaxError, ValueError) as exc:
+                raise RuntimeError(
+                    f"could not verify GNOME wallpaper setting {key}"
+                ) from exc
+            if current_uri != image_uri:
+                raise RuntimeError(
+                    f"GNOME wallpaper setting {key} was not applied; "
+                    "run this command from an active GNOME desktop session"
+                )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "gsettings is not installed; GNOME wallpaper cannot be changed"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "GNOME rejected the wallpaper setting; run this command from "
+            "an active GNOME desktop session"
+        ) from exc
+
+    print("Wallpaper:", image)
+    return image
 
 
 def parse_dimension(value):
@@ -475,6 +558,16 @@ def main():
     )
     parser.add_argument("--country", default="CN")
     parser.add_argument("--locale", default="zh-CN")
+    parser.add_argument(
+        "--set-wallpaper",
+        nargs="?",
+        const="",
+        metavar="IMAGE",
+        help=(
+            "set the GNOME light and dark wallpaper; if IMAGE is omitted, "
+            "choose a random image from the output directory"
+        ),
+    )
     args = parser.parse_args()
 
     app = SpotlightDownloader(
@@ -485,6 +578,13 @@ def main():
     )
     try:
         app.run()
+        if args.set_wallpaper is not None:
+            wallpaper = (
+                choose_wallpaper(app.output)
+                if args.set_wallpaper == ""
+                else Path(args.set_wallpaper)
+            )
+            set_gnome_wallpaper(wallpaper)
     except (OSError, requests.RequestException, RuntimeError) as exc:
         parser.exit(1, f"Error: {exc}\n")
     finally:

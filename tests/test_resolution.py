@@ -1,10 +1,12 @@
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import call, patch
 
 import requests
 from PIL import Image
@@ -14,8 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from spotlight_downloader import (  # noqa: E402
     SpotlightDownloader,
+    choose_wallpaper,
     landscape_candidates,
     resolution_from_url,
+    set_gnome_wallpaper,
 )
 
 
@@ -80,6 +84,125 @@ def jpeg_bytes(size=(1920, 1080)):
 
 
 class ResolutionSelectionTests(unittest.TestCase):
+    def test_choose_wallpaper_uses_supported_images_only(self):
+        with tempfile.TemporaryDirectory() as output:
+            output_path = Path(output)
+            image = output_path / "wallpaper.JPG"
+            image.write_bytes(b"image")
+            (output_path / "wallpaper.jpg.json").write_text("{}")
+
+            self.assertEqual(choose_wallpaper(output_path), image)
+
+    def test_choose_wallpaper_fails_when_archive_has_no_images(self):
+        with tempfile.TemporaryDirectory() as output:
+            with self.assertRaisesRegex(RuntimeError, "no wallpaper images"):
+                choose_wallpaper(output)
+
+    @patch("spotlight_downloader.subprocess.run")
+    def test_sets_gnome_light_and_dark_wallpapers(self, run):
+        with tempfile.TemporaryDirectory() as output:
+            image = Path(output) / "wallpaper with spaces.jpg"
+            image.write_bytes(b"image")
+            uri = image.resolve().as_uri()
+            run.side_effect = [
+                subprocess.CompletedProcess([], 0, "", ""),
+                subprocess.CompletedProcess([], 0, "", ""),
+                subprocess.CompletedProcess([], 0, repr(uri), ""),
+                subprocess.CompletedProcess([], 0, repr(uri), ""),
+            ]
+
+            result = set_gnome_wallpaper(image)
+
+        self.assertEqual(result, image.resolve())
+        self.assertEqual(
+            run.call_args_list,
+            [
+                call(
+                    [
+                        "gsettings",
+                        "set",
+                        "org.gnome.desktop.background",
+                        "picture-uri",
+                        uri,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ),
+                call(
+                    [
+                        "gsettings",
+                        "set",
+                        "org.gnome.desktop.background",
+                        "picture-uri-dark",
+                        uri,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ),
+                call(
+                    [
+                        "gsettings",
+                        "get",
+                        "org.gnome.desktop.background",
+                        "picture-uri",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ),
+                call(
+                    [
+                        "gsettings",
+                        "get",
+                        "org.gnome.desktop.background",
+                        "picture-uri-dark",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ),
+            ],
+        )
+
+    @patch("spotlight_downloader.subprocess.run")
+    def test_detects_dconf_commit_warning_with_success_status(self, run):
+        run.return_value = subprocess.CompletedProcess(
+            [],
+            0,
+            "",
+            "dconf-WARNING: failed to commit changes: Could not connect",
+        )
+        with tempfile.TemporaryDirectory() as output:
+            image = Path(output) / "wallpaper.jpg"
+            image.write_bytes(b"image")
+
+            with self.assertRaisesRegex(RuntimeError, "could not commit"):
+                set_gnome_wallpaper(image)
+
+        self.assertEqual(run.call_count, 1)
+
+    @patch("spotlight_downloader.subprocess.run")
+    def test_detects_wallpaper_setting_that_was_not_applied(self, run):
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, repr("file:///old.jpg"), ""),
+        ]
+        with tempfile.TemporaryDirectory() as output:
+            image = Path(output) / "wallpaper.jpg"
+            image.write_bytes(b"image")
+
+            with self.assertRaisesRegex(RuntimeError, "was not applied"):
+                set_gnome_wallpaper(image)
+
+    @patch("spotlight_downloader.subprocess.run")
+    def test_rejects_missing_wallpaper_before_changing_settings(self, run):
+        with self.assertRaisesRegex(RuntimeError, "does not exist"):
+            set_gnome_wallpaper("/missing/wallpaper.jpg")
+        run.assert_not_called()
+
     def test_get_images_fetches_more_than_four_in_batches(self):
         first_batch = [f"https://cdn.example/{number}_3840x2160.jpg" for number in range(4)]
         second_batch = [
