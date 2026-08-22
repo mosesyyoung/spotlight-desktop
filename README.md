@@ -14,6 +14,8 @@ Current MVP:
 
 - ✅ Query Microsoft Windows Spotlight API
 - ✅ Download Spotlight wallpapers
+- ✅ Prefer 3840×2160 (4K), with lower-resolution fallback
+- ✅ Detect and record the downloaded image resolution
 - ✅ Support localization (country / locale)
 - ✅ Download metadata
 - ✅ Duplicate detection
@@ -218,6 +220,14 @@ Parameters:
 
 ## Metadata
 
+The downloader first uses the v4 Spotlight feed for 3840×2160 images. If that
+feed or a 4K asset is unavailable, it falls back to the v3 feed's lower-resolution
+wallpapers. Legacy placeholder assets are ignored.
+
+Each image's JSON metadata includes its detected `width`, `height`, `resolution`,
+and `is_4k` values. These dimensions are read from the downloaded image itself,
+not trusted from the filename or API response.
+
 For every downloaded image:
 
 Example:
@@ -228,6 +238,10 @@ Example:
   "title": "玫瑰色巨石",
   "copyright": "© Microsoft",
   "description": "...",
+  "width": 3840,
+  "height": 2160,
+  "resolution": "3840x2160",
+  "is_4k": true,
   "download_time": "2026-08-22T01:30:00",
   "file": "20260822_013000_xxxxxxxx.jpg"
 }
@@ -254,9 +268,9 @@ Planned:
 
 #### Resolution handling
 
-- Detect original image resolution
-- Prefer 3840x2160 / 4K images
-- Fallback to lower resolution
+- [x] Detect original image resolution
+- [x] Prefer 3840x2160 / 4K images
+- [x] Fallback to lower resolution
 
 #### Portrait mode
 
