@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 
 import requests
 from PIL import Image
@@ -19,6 +19,7 @@ from spotlight_downloader import (  # noqa: E402
     choose_wallpaper,
     landscape_candidates,
     main,
+    refresh_wallpaper,
     resolution_from_url,
     set_gnome_wallpaper,
 )
@@ -85,6 +86,44 @@ def jpeg_bytes(size=(1920, 1080)):
 
 
 class ResolutionSelectionTests(unittest.TestCase):
+    @patch("spotlight_downloader.refresh_wallpaper")
+    @patch("spotlight_downloader.SpotlightDownloader")
+    def test_refresh_option_runs_scheduled_refresh(self, downloader, refresh):
+        app = downloader.return_value
+
+        main(["--refresh", "--output", "/archive"])
+
+        refresh.assert_called_once_with(app)
+        app.run.assert_not_called()
+        app.session.close.assert_called_once_with()
+
+    @patch("spotlight_downloader.set_gnome_wallpaper")
+    def test_refresh_sets_a_newly_downloaded_wallpaper(self, set_wallpaper):
+        image = Path("/archive/new.jpg")
+        downloader = Mock()
+        downloader.run.return_value = [image]
+        set_wallpaper.return_value = image
+
+        result = refresh_wallpaper(downloader)
+
+        self.assertEqual(result, image)
+        set_wallpaper.assert_called_once_with(image)
+
+    @patch("spotlight_downloader.set_gnome_wallpaper")
+    def test_refresh_leaves_wallpaper_unchanged_without_new_images(
+        self, set_wallpaper
+    ):
+        downloader = Mock()
+        downloader.run.return_value = []
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = refresh_wallpaper(downloader)
+
+        self.assertIsNone(result)
+        set_wallpaper.assert_not_called()
+        self.assertIn("wallpaper unchanged", output.getvalue())
+
     @patch("spotlight_downloader.SpotlightDownloader")
     @patch("spotlight_downloader.set_gnome_wallpaper")
     def test_explicit_wallpaper_does_not_start_downloader(
@@ -102,6 +141,15 @@ class ResolutionSelectionTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("1.1.0", output.getvalue())
+
+    def test_systemd_timer_runs_hourly_refresh_service(self):
+        project_root = Path(__file__).resolve().parents[1]
+        timer = (project_root / "systemd/spotlight-desktop.timer").read_text()
+        service = (project_root / "systemd/spotlight-desktop.service").read_text()
+
+        self.assertIn("OnCalendar=hourly", timer)
+        self.assertIn("Persistent=true", timer)
+        self.assertIn("spotlight_downloader.py --refresh", service)
 
     def test_choose_wallpaper_uses_supported_images_only(self):
         with tempfile.TemporaryDirectory() as output:
@@ -422,9 +470,12 @@ class ResolutionSelectionTests(unittest.TestCase):
             downloader.session.close()
             downloader.session = FakeSession([FakeResponse(jpeg_bytes())])
 
-            downloader.download_image({"url": url})
-            downloader.download_image({"url": url})
+            image_file = downloader.download_image({"url": url})
+            duplicate = downloader.download_image({"url": url})
 
+            self.assertEqual(image_file.parent, output_path)
+            self.assertTrue(image_file.is_file())
+            self.assertIsNone(duplicate)
             self.assertEqual(len(downloader.session.calls), 1)
             self.assertEqual(len(list(output_path.glob("*.jpg.json"))), 1)
             self.assertFalse((output_path / "downloaded.json").exists())
@@ -468,6 +519,20 @@ class ResolutionSelectionTests(unittest.TestCase):
             calls,
             ["https://cdn.example/4k.jpg", "https://cdn.example/1080.jpg"],
         )
+
+    def test_run_returns_only_files_downloaded_in_this_run(self):
+        known = {"url": "https://cdn.example/known.jpg"}
+        new = {"url": "https://cdn.example/new.jpg"}
+        new_file = Path("/archive/new.jpg")
+
+        with tempfile.TemporaryDirectory() as output:
+            downloader = SpotlightDownloader(output, count=2)
+            downloader.get_images = lambda: [known, new]
+            downloader.download_image = Mock(side_effect=[None, new_file])
+
+            downloaded_files = downloader.run()
+
+        self.assertEqual(downloaded_files, [new_file])
 
 
 if __name__ == "__main__":

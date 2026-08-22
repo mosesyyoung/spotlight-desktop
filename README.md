@@ -227,6 +227,7 @@ Parameters:
 | --country               | Country code         | CN                          |
 | --locale                | Language locale      | zh-CN                       |
 | --set-wallpaper [IMAGE] | Set GNOME wallpaper  | Disabled                    |
+| --refresh               | Set a new download    | Disabled                    |
 | --version               | Show program version | —                           |
 
 The Spotlight API returns at most four images per request. Larger `--count`
@@ -251,6 +252,58 @@ contacting the Spotlight API or downloading new images.
 Wallpaper integration uses GNOME's `picture-uri` and `picture-uri-dark`
 settings. It requires `gsettings` and an active GNOME desktop session so the
 command can reach the user's D-Bus/dconf settings database.
+
+To check for new images once and change the wallpaper only when a new image was
+downloaded:
+
+```bash
+python spotlight_downloader.py --refresh
+```
+
+Known images are identified through their existing metadata files and are not
+downloaded again. If every image returned by Spotlight is already in the
+archive, `--refresh` leaves the current wallpaper unchanged.
+
+---
+
+## Scheduled refresh
+
+The included user-level systemd timer runs the refresh command hourly. Install
+the application and units into the paths expected by the service:
+
+```bash
+install -Dm755 spotlight_downloader.py \
+    ~/.local/share/spotlight-desktop/spotlight_downloader.py
+install -Dm644 requirements.txt \
+    ~/.local/share/spotlight-desktop/requirements.txt
+
+python3 -m venv ~/.local/share/spotlight-desktop/.venv
+~/.local/share/spotlight-desktop/.venv/bin/pip install \
+    -r ~/.local/share/spotlight-desktop/requirements.txt
+
+install -Dm644 systemd/spotlight-desktop.service \
+    ~/.config/systemd/user/spotlight-desktop.service
+install -Dm644 systemd/spotlight-desktop.timer \
+    ~/.config/systemd/user/spotlight-desktop.timer
+
+systemctl --user daemon-reload
+systemctl --user enable --now spotlight-desktop.timer
+```
+
+The service uses the default `~/Pictures/SpotlightArchive` directory. It runs
+inside the logged-in user's systemd manager so `gsettings` can access the GNOME
+session. Check the schedule and recent logs with:
+
+```bash
+systemctl --user list-timers spotlight-desktop.timer
+journalctl --user -u spotlight-desktop.service
+```
+
+Run an immediate refresh with:
+
+```bash
+systemctl --user start spotlight-desktop.service
+```
 
 ---
 
@@ -341,14 +394,14 @@ gsettings set org.gnome.desktop.background picture-uri-dark \
 
 ### v1.2 Automation
 
-Planned:
+Completed:
 
 #### Scheduled wallpaper refresh
 
-- systemd timer support
-- Hourly update check
-- Download only new wallpapers
-- Automatically set a newly downloaded wallpaper
+- [x] systemd timer support
+- [x] Hourly update check
+- [x] Download only new wallpapers
+- [x] Automatically set a newly downloaded wallpaper
 
 If new wallpapers are available, download them and set one as the wallpaper.
 If no new wallpaper is available, make no changes.
