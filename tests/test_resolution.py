@@ -19,9 +19,10 @@ from spotlight_downloader import (  # noqa: E402
 
 
 class FakeResponse:
-    def __init__(self, content=b"", status_code=200):
+    def __init__(self, content=b"", status_code=200, json_data=None):
         self.content = content
         self.status_code = status_code
+        self.json_data = json_data
 
     def __enter__(self):
         return self
@@ -37,16 +38,68 @@ class FakeResponse:
         for offset in range(0, len(self.content), chunk_size):
             yield self.content[offset : offset + chunk_size]
 
+    def json(self):
+        return self.json_data
+
 
 class FakeSession:
     def __init__(self, responses):
         self.responses = iter(responses)
+        self.calls = []
 
-    def get(self, *_args, **_kwargs):
+    def get(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         return next(self.responses)
 
 
+def api_payload(*urls):
+    return {
+        "batchrsp": {
+            "items": [
+                {
+                    "item": json.dumps(
+                        {
+                            "ad": {
+                                "landscapeImage": {"asset": url},
+                                "title": url.rsplit("/", 1)[-1],
+                            }
+                        }
+                    )
+                }
+                for url in urls
+            ]
+        }
+    }
+
+
 class ResolutionSelectionTests(unittest.TestCase):
+    def test_get_images_fetches_more_than_four_in_batches(self):
+        first_batch = [f"https://cdn.example/{number}_3840x2160.jpg" for number in range(4)]
+        second_batch = [
+            "https://cdn.example/3_3840x2160.jpg",
+            "https://cdn.example/4_3840x2160.jpg",
+            "https://cdn.example/5_3840x2160.jpg",
+        ]
+
+        with tempfile.TemporaryDirectory() as output:
+            downloader = SpotlightDownloader(output, count=6)
+            downloader.session.close()
+            downloader.session = FakeSession(
+                [
+                    FakeResponse(json_data=api_payload(*first_batch)),
+                    FakeResponse(json_data=api_payload(*second_batch)),
+                ]
+            )
+
+            images = downloader.get_images()
+
+        self.assertEqual(len(images), 6)
+        self.assertEqual(len({image["url"] for image in images}), 6)
+        self.assertEqual(
+            [call[1]["params"]["bcnt"] for call in downloader.session.calls],
+            [4, 2],
+        )
+
     def test_extracts_resolution_from_asset_url(self):
         self.assertEqual(
             resolution_from_url("https://cdn.example/wallpaper_3840x2160.jpg"),
