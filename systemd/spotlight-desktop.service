@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh the Microsoft Spotlight desktop wallpaper
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/spotlight-desktop
+ExecStart=%h/.local/share/spotlight-desktop/.venv/bin/python %h/.local/share/spotlight-desktop/spotlight_downloader.py --refresh
+Environment=PYTHONUNBUFFERED=1

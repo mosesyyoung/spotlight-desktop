@@ -113,6 +113,17 @@ def set_gnome_wallpaper(image):
     return image
 
 
+def refresh_wallpaper(downloader):
+    """Download new images and apply one only when the archive changed."""
+    downloaded_files = downloader.run()
+    if not downloaded_files:
+        print("No new wallpapers found; wallpaper unchanged")
+        return None
+
+    wallpaper = random.choice(downloaded_files)
+    return set_gnome_wallpaper(wallpaper)
+
+
 def parse_dimension(value):
     """Return a positive integer dimension, or None for invalid API data."""
     try:
@@ -407,7 +418,7 @@ class SpotlightDownloader:
             old_file = self.history.get(candidate["url"])
             if old_file is not None and old_file.is_file():
                 print("Skip:", old_file.name)
-                return
+                return None
 
         url = candidates[0]["url"]
         sha = hashlib.sha256(url.encode("utf-8")).hexdigest()
@@ -473,6 +484,7 @@ class SpotlightDownloader:
             encoding="utf-8",
         )
         self.add_to_history(metadata, image_file)
+        return image_file
 
     def run(self):
         using_lower_resolution = False
@@ -488,11 +500,14 @@ class SpotlightDownloader:
             raise RuntimeError("Spotlight APIs returned no usable images")
         print(f"Found {len(images)} images")
 
+        downloaded_files = []
         failures = []
         fallback_images = iter(()) if using_lower_resolution else None
         for image in images:
             try:
-                self.download_image(image)
+                image_file = self.download_image(image)
+                if image_file is not None:
+                    downloaded_files.append(image_file)
             except (OSError, requests.RequestException, RuntimeError) as exc:
                 title = image.get("title") or image["url"]
                 print(f"Failed: {title}: {exc}", file=sys.stderr)
@@ -510,7 +525,9 @@ class SpotlightDownloader:
                 replaced = False
                 for fallback_image in fallback_images:
                     try:
-                        self.download_image(fallback_image)
+                        image_file = self.download_image(fallback_image)
+                        if image_file is not None:
+                            downloaded_files.append(image_file)
                         replaced = True
                         break
                     except (
@@ -533,6 +550,7 @@ class SpotlightDownloader:
             raise RuntimeError(
                 f"{len(failures)} of {len(images)} image(s) could not be downloaded"
             )
+        return downloaded_files
 
 
 def positive_int(value):
@@ -564,7 +582,8 @@ def main(argv=None):
     )
     parser.add_argument("--country", default="CN")
     parser.add_argument("--locale", default="zh-CN")
-    parser.add_argument(
+    wallpaper_actions = parser.add_mutually_exclusive_group()
+    wallpaper_actions.add_argument(
         "--set-wallpaper",
         nargs="?",
         const="",
@@ -572,6 +591,13 @@ def main(argv=None):
         help=(
             "set the GNOME light and dark wallpaper; if IMAGE is omitted, "
             "choose a random image from the output directory"
+        ),
+    )
+    wallpaper_actions.add_argument(
+        "--refresh",
+        action="store_true",
+        help=(
+            "download only new wallpapers and set one when new images are found"
         ),
     )
     args = parser.parse_args(argv)
@@ -590,13 +616,12 @@ def main(argv=None):
         args.count,
     )
     try:
-        app.run()
-        if args.set_wallpaper is not None:
-            wallpaper = (
-                choose_wallpaper(app.output)
-                if args.set_wallpaper == ""
-                else Path(args.set_wallpaper)
-            )
+        if args.refresh:
+            refresh_wallpaper(app)
+        else:
+            app.run()
+        if args.set_wallpaper == "":
+            wallpaper = choose_wallpaper(app.output)
             set_gnome_wallpaper(wallpaper)
     except (OSError, requests.RequestException, RuntimeError) as exc:
         parser.exit(1, f"Error: {exc}\n")

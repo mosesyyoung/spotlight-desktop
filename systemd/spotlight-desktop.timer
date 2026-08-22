@@ -1,0 +1,10 @@
+[Unit]
+Description=Check hourly for a new Microsoft Spotlight wallpaper
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=spotlight-desktop.service
+
+[Install]
+WantedBy=timers.target

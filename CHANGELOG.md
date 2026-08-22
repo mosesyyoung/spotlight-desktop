@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- `--refresh` mode that applies a wallpaper only when new Spotlight images are
+  downloaded.
+- A user-level systemd service and hourly timer for scheduled wallpaper
+  refreshes.
+
+### Changed
+
+- Download operations now report which image files were added during the
+  current run, allowing known archive images to leave the wallpaper unchanged.
+
 ## [1.1.0] - 2026-08-23
 
 ### Added
