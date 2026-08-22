@@ -99,6 +99,16 @@ Required software:
 
 - pip
 
+GNOME wallpaper integration additionally requires:
+
+- An active GNOME desktop session
+
+- `gsettings` (provided by `libglib2.0-bin` on Ubuntu)
+
+- Access to the session's D-Bus/dconf services; wallpaper changes will not work
+  from a plain SSH session or a timer that is not connected to the desktop
+  session
+
 ---
 
 ## Installation
@@ -126,7 +136,7 @@ python3 --version
 ### 2. Clone project
 
 ```bash
-git clone https://github.com/<your-name>/spotlight-desktop.git
+git clone https://github.com/mosesyyoung/spotlight-desktop.git
 
 cd spotlight-desktop
 ```
@@ -164,7 +174,9 @@ pip install -r requirements.txt
 Current dependencies:
 
 ```
-requests
+requests>=2.31.0
+urllib3>=1.26.0
+Pillow>=10.0.0
 ```
 
 ---
@@ -215,6 +227,7 @@ Parameters:
 | --country               | Country code         | CN                          |
 | --locale                | Language locale      | zh-CN                       |
 | --set-wallpaper [IMAGE] | Set GNOME wallpaper  | Disabled                    |
+| --version               | Show program version | —                           |
 
 The Spotlight API returns at most four images per request. Larger `--count`
 values are fetched automatically in multiple batches and deduplicated by URL.
@@ -232,9 +245,12 @@ To use a specific image instead:
 python spotlight_downloader.py --set-wallpaper ~/Pictures/wallpaper.jpg
 ```
 
+When `IMAGE` is provided, the wallpaper is changed immediately without
+contacting the Spotlight API or downloading new images.
+
 Wallpaper integration uses GNOME's `picture-uri` and `picture-uri-dark`
-settings. Run the command from an active GNOME desktop session so `gsettings`
-can reach the user's settings database.
+settings. It requires `gsettings` and an active GNOME desktop session so the
+command can reach the user's D-Bus/dconf settings database.
 
 ---
 
@@ -288,7 +304,7 @@ Completed:
 
 ### v1.1 Desktop Integration
 
-Planned:
+Completed:
 
 #### Resolution handling
 
