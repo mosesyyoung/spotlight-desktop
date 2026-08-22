@@ -158,6 +158,7 @@ class SpotlightDownloader:
     def load_history(self):
         """Build download history from per-image metadata JSON files."""
         history = {}
+        loaded_metadata = 0
         for metadata_file in sorted(self.output.glob("*.jpg.json")):
             try:
                 metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
@@ -179,8 +180,19 @@ class SpotlightDownloader:
             if not image_file.is_file():
                 continue
 
-            for url in self.metadata_urls(metadata):
+            urls = self.metadata_urls(metadata)
+            if not urls:
+                continue
+
+            for url in urls:
                 history[url] = image_file
+            loaded_metadata += 1
+
+        file_label = "file" if loaded_metadata == 1 else "files"
+        print(
+            f"Loaded {loaded_metadata} metadata JSON {file_label} "
+            "into download history"
+        )
         return history
 
     def add_to_history(self, metadata, image_file):
