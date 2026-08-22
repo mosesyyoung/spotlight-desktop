@@ -4,21 +4,104 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
+from PIL import Image, UnidentifiedImageError
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
 API_URL = "https://fd.api.iris.microsoft.com/v4/api/selection"
+FALLBACK_API_URL = "https://arc.msn.com/v3/Delivery/Placement"
+PREFERRED_RESOLUTION = (3840, 2160)
+RESOLUTION_PATTERN = re.compile(r"(?<!\d)(\d{3,5})x(\d{3,5})(?!\d)", re.IGNORECASE)
 
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
+
+
+def parse_dimension(value):
+    """Return a positive integer dimension, or None for invalid API data."""
+    try:
+        dimension = int(value)
+    except (TypeError, ValueError):
+        return None
+    return dimension if dimension > 0 else None
+
+
+def resolution_from_url(url):
+    """Extract a resolution hint such as 3840x2160 from an asset URL."""
+    matches = RESOLUTION_PATTERN.findall(url or "")
+    if not matches:
+        return None, None
+    return tuple(map(int, matches[-1]))
+
+
+def make_candidate(asset):
+    """Normalize a Spotlight asset object into a resolution candidate."""
+    if isinstance(asset, str):
+        url = asset
+        width = height = None
+    elif isinstance(asset, dict):
+        url = asset.get("asset") or asset.get("u") or asset.get("url")
+        width = parse_dimension(asset.get("width") or asset.get("w"))
+        height = parse_dimension(asset.get("height") or asset.get("h"))
+    else:
+        return None
+
+    if not isinstance(url, str) or not url.lower().startswith("https://"):
+        return None
+    filename = Path(urlsplit(url).path).name.lower()
+    if re.search(r"(?:^|_)empty\.(?:jpe?g|png)$", filename):
+        return None
+    if width is None or height is None:
+        hinted_width, hinted_height = resolution_from_url(url)
+        width = width or hinted_width
+        height = height or hinted_height
+    return {"url": url, "width": width, "height": height}
+
+
+def candidate_rank(candidate):
+    """Rank exact 4K first, followed by the largest lower-resolution asset."""
+    width = candidate.get("width")
+    height = candidate.get("height")
+    if not width or not height:
+        return (1, 0)
+
+    area = width * height
+    if (width, height) == PREFERRED_RESOLUTION:
+        return (3, area)
+    return (2, area)
+
+
+def landscape_candidates(ad):
+    """Collect and rank landscape assets from v4 and legacy API shapes."""
+    assets = []
+    if "landscapeImage" in ad:
+        assets.append(ad["landscapeImage"])
+
+    legacy_keys = sorted(
+        key
+        for key in ad
+        if re.fullmatch(r"image_fullscreen_\d+_landscape", key)
+    )
+    assets.extend(ad[key] for key in legacy_keys)
+
+    candidates = []
+    seen_urls = set()
+    for asset in assets:
+        candidate = make_candidate(asset)
+        if candidate and candidate["url"] not in seen_urls:
+            seen_urls.add(candidate["url"])
+            candidates.append(candidate)
+    return sorted(candidates, key=candidate_rank, reverse=True)
 
 
 def create_session():
@@ -94,22 +177,66 @@ class SpotlightDownloader:
         except (requests.exceptions.JSONDecodeError, KeyError, TypeError) as exc:
             raise RuntimeError("Spotlight API returned an unexpected response") from exc
 
+        return self.parse_images(items)
+
+    def get_lower_resolution_images(self):
+        params = {
+            "pid": "338387",
+            "fmt": "json",
+            "ua": "WindowsShellClient/0",
+            "cdm": "1",
+            "pl": self.locale,
+            "lc": self.locale,
+            "ctry": self.country,
+            "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+        print("Query lower-resolution Spotlight API...")
+        response = self.session.get(
+            FALLBACK_API_URL, params=params, timeout=(20, 30)
+        )
+        response.raise_for_status()
+
+        try:
+            items = response.json()["batchrsp"]["items"]
+        except (requests.exceptions.JSONDecodeError, KeyError, TypeError) as exc:
+            raise RuntimeError(
+                "Lower-resolution Spotlight API returned an unexpected response"
+            ) from exc
+
+        return self.parse_images(items)
+
+    @staticmethod
+    def parse_images(items):
         result = []
         for item in items:
             try:
                 raw_item = item["item"]
                 obj = json.loads(raw_item) if isinstance(raw_item, str) else raw_item
                 ad = obj.get("ad", {})
-                image = ad.get("landscapeImage", {}).get("asset")
+                candidates = landscape_candidates(ad)
             except (KeyError, TypeError, json.JSONDecodeError):
                 continue
 
-            if image:
+            if candidates:
+                legacy_title = ad.get("title_text", {})
+                legacy_copyright = ad.get("copyright_text", {})
                 result.append(
                     {
-                        "url": image,
-                        "title": ad.get("title"),
-                        "copyright": ad.get("copyright"),
+                        "url": candidates[0]["url"],
+                        "candidates": candidates,
+                        "title": ad.get("title")
+                        or (
+                            legacy_title.get("tx")
+                            if isinstance(legacy_title, dict)
+                            else None
+                        ),
+                        "copyright": ad.get("copyright")
+                        or (
+                            legacy_copyright.get("tx")
+                            if isinstance(legacy_copyright, dict)
+                            else None
+                        ),
                         "description": ad.get("description"),
                     }
                 )
@@ -117,7 +244,9 @@ class SpotlightDownloader:
         return result
 
     def download_image(self, item):
-        url = item["url"]
+        candidates = item.get("candidates") or [make_candidate(item["url"])]
+        candidates = [candidate for candidate in candidates if candidate]
+        url = candidates[0]["url"]
         sha = hashlib.sha256(url.encode("utf-8")).hexdigest()
 
         old_record = self.db.get(sha)
@@ -133,23 +262,52 @@ class SpotlightDownloader:
         image_file = self.output / filename
         temp_file = image_file.with_suffix(".jpg.part")
 
-        try:
-            with self.session.get(url, timeout=(20, 90), stream=True) as response:
-                response.raise_for_status()
-                with temp_file.open("wb") as output_file:
-                    for chunk in response.iter_content(chunk_size=128 * 1024):
-                        if chunk:
-                            output_file.write(chunk)
+        failures = []
+        for candidate in candidates:
+            candidate_url = candidate["url"]
+            try:
+                with self.session.get(
+                    candidate_url, timeout=(20, 90), stream=True
+                ) as response:
+                    response.raise_for_status()
+                    with temp_file.open("wb") as output_file:
+                        for chunk in response.iter_content(chunk_size=128 * 1024):
+                            if chunk:
+                                output_file.write(chunk)
 
-            if temp_file.stat().st_size == 0:
-                raise RuntimeError("server returned an empty image")
-            temp_file.replace(image_file)
-        except Exception:
-            temp_file.unlink(missing_ok=True)
-            raise
+                if temp_file.stat().st_size == 0:
+                    raise RuntimeError("server returned an empty image")
+                with Image.open(temp_file) as downloaded_image:
+                    width, height = downloaded_image.size
+                    downloaded_image.verify()
+                url = candidate_url
+                temp_file.replace(image_file)
+                break
+            except (
+                OSError,
+                requests.RequestException,
+                RuntimeError,
+                UnidentifiedImageError,
+            ) as exc:
+                temp_file.unlink(missing_ok=True)
+                failures.append(f"{candidate_url}: {exc}")
+        else:
+            raise RuntimeError("all resolution candidates failed: " + "; ".join(failures))
+
+        resolution = f"{width}x{height}"
+        suffix = " (4K)" if (width, height) == PREFERRED_RESOLUTION else ""
+        print(f"Resolution: {resolution}{suffix}")
 
         metadata = {
             **item,
+            "url": url,
+            "width": width,
+            "height": height,
+            "resolution": resolution,
+            "is_4k": (
+                width >= PREFERRED_RESOLUTION[0]
+                and height >= PREFERRED_RESOLUTION[1]
+            ),
             "download_time": datetime.now().isoformat(),
             "file": filename,
         }
@@ -163,17 +321,59 @@ class SpotlightDownloader:
         self.save_db()
 
     def run(self):
-        images = self.get_images()
+        using_lower_resolution = False
+        try:
+            images = self.get_images()
+            if not images:
+                raise RuntimeError("4K API returned no usable images")
+        except (requests.RequestException, RuntimeError) as exc:
+            print(f"4K API failed, using lower-resolution API: {exc}", file=sys.stderr)
+            images = self.get_lower_resolution_images()
+            using_lower_resolution = True
+        if not images:
+            raise RuntimeError("Spotlight APIs returned no usable images")
         print(f"Found {len(images)} images")
 
         failures = []
+        fallback_images = iter(()) if using_lower_resolution else None
         for image in images:
             try:
                 self.download_image(image)
             except (OSError, requests.RequestException, RuntimeError) as exc:
                 title = image.get("title") or image["url"]
-                failures.append((title, exc))
                 print(f"Failed: {title}: {exc}", file=sys.stderr)
+
+                if fallback_images is None:
+                    try:
+                        fallback_images = iter(self.get_lower_resolution_images())
+                    except (requests.RequestException, RuntimeError) as fallback_exc:
+                        print(
+                            f"Lower-resolution API failed: {fallback_exc}",
+                            file=sys.stderr,
+                        )
+                        fallback_images = iter(())
+
+                replaced = False
+                for fallback_image in fallback_images:
+                    try:
+                        self.download_image(fallback_image)
+                        replaced = True
+                        break
+                    except (
+                        OSError,
+                        requests.RequestException,
+                        RuntimeError,
+                    ) as fallback_exc:
+                        fallback_title = (
+                            fallback_image.get("title") or fallback_image["url"]
+                        )
+                        print(
+                            f"Failed fallback: {fallback_title}: {fallback_exc}",
+                            file=sys.stderr,
+                        )
+
+                if not replaced:
+                    failures.append((title, exc))
 
         if failures:
             raise RuntimeError(
