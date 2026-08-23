@@ -34,5 +34,11 @@ jobs:
       - name: Compile source
         run: python -m py_compile spotlight_downloader.py
 
+      - name: Check GNOME extension JavaScript
+        run: node --check gnome-extension/spotlight-desktop@mosesyyoung/extension.js
+
+      - name: Check installer shell syntax
+        run: sh -n scripts/install-gnome-extension.sh
+
       - name: Run tests
         run: python -m unittest discover -s tests -v

@@ -1,0 +1,27 @@
+.spotlight-information-heading,
+.spotlight-information-title,
+.spotlight-information-location,
+.spotlight-information-body,
+.spotlight-information-copyright,
+.spotlight-information-file {
+    width: 360px;
+}
+
+.spotlight-information-heading {
+    font-weight: bold;
+}
+
+.spotlight-information-title {
+    font-size: 1.1em;
+    font-weight: bold;
+}
+
+.spotlight-information-location,
+.spotlight-information-copyright {
+    opacity: 0.8;
+}
+
+.spotlight-information-file {
+    font-size: 0.85em;
+    opacity: 0.65;
+}

@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -17,11 +18,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from spotlight_downloader import (  # noqa: E402
     SpotlightDownloader,
     choose_wallpaper,
+    current_state_file,
+    current_wallpaper_state,
     landscape_candidates,
     main,
     refresh_wallpaper,
     resolution_from_url,
     set_gnome_wallpaper,
+    write_current_wallpaper_state,
 )
 
 
@@ -140,7 +144,76 @@ class ResolutionSelectionTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertIn("1.1.0", output.getvalue())
+        self.assertIn("1.2.0", output.getvalue())
+
+    def test_current_state_uses_xdg_directory_and_existing_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            state_home = temporary_path / "state"
+            image = temporary_path / "风景.jpg"
+            image.write_bytes(b"image")
+            metadata_file = Path(f"{image}.json")
+            metadata_file.write_text(
+                json.dumps(
+                    {
+                        "title": "九寨沟之秋",
+                        "description": "五彩斑斓的湖泊与森林。",
+                        "copyright": "© Photographer",
+                        "url": "https://cdn.example/wallpaper.jpg",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"XDG_STATE_HOME": str(state_home)}):
+                state_file = write_current_wallpaper_state(image)
+                expected_file = current_state_file()
+
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(state_file, expected_file)
+            self.assertEqual(state["image"], str(image.resolve()))
+            self.assertEqual(state["metadata"], str(metadata_file.resolve()))
+            self.assertEqual(state["title"], "九寨沟之秋")
+            self.assertEqual(state["description"], "五彩斑斓的湖泊与森林。")
+            self.assertNotIn("location", state)
+            self.assertIn("+", state["updated_at"])
+            self.assertEqual(state_file.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(state_file.parent.stat().st_mode & 0o777, 0o700)
+            self.assertFalse(state_file.with_name("current.json.tmp").exists())
+            self.assertEqual(
+                list(state_file.parent.glob(".current.json.*.tmp")),
+                [],
+            )
+
+    def test_current_state_omits_missing_metadata_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            image = Path(temporary) / "wallpaper.jpg"
+            image.write_bytes(b"image")
+
+            state = current_wallpaper_state(image)
+
+        self.assertEqual(state["image"], str(image.resolve()))
+        self.assertNotIn("metadata", state)
+        self.assertNotIn("title", state)
+        self.assertNotIn("location", state)
+
+    def test_invalid_metadata_does_not_block_current_state_update(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            image = temporary_path / "wallpaper.jpg"
+            image.write_bytes(b"image")
+            Path(f"{image}.json").write_text("not JSON", encoding="utf-8")
+            state_file = temporary_path / "state/current.json"
+            warnings = io.StringIO()
+
+            with redirect_stderr(warnings):
+                write_current_wallpaper_state(image, state_file)
+
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(state["image"], str(image.resolve()))
+            self.assertNotIn("metadata", state)
+            self.assertIn("cannot read wallpaper metadata", warnings.getvalue())
 
     def test_systemd_timer_runs_hourly_refresh_service(self):
         project_root = Path(__file__).resolve().parents[1]
@@ -150,6 +223,52 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("OnCalendar=hourly", timer)
         self.assertIn("Persistent=true", timer)
         self.assertIn("spotlight_downloader.py --refresh", service)
+
+    def test_gnome_extension_targets_shell_50_and_monitors_current_state(self):
+        project_root = Path(__file__).resolve().parents[1]
+        extension_directory = (
+            project_root
+            / "gnome-extension"
+            / "spotlight-desktop@mosesyyoung"
+        )
+        metadata = json.loads(
+            (extension_directory / "metadata.json").read_text(encoding="utf-8")
+        )
+        source = (extension_directory / "extension.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(metadata["uuid"], "spotlight-desktop@mosesyyoung")
+        self.assertEqual(metadata["shell-version"], ["50"])
+        self.assertIn("GLib.get_user_state_dir()", source)
+        self.assertIn("monitor_directory", source)
+        self.assertIn("this._monitor?.cancel()", source)
+        self.assertNotIn("timeout_add", source)
+
+    def test_gnome_extension_installer_uses_user_data_directory(self):
+        project_root = Path(__file__).resolve().parents[1]
+        installer = project_root / "scripts/install-gnome-extension.sh"
+
+        with tempfile.TemporaryDirectory() as temporary:
+            data_home = Path(temporary) / "data"
+            environment = {**os.environ, "XDG_DATA_HOME": str(data_home)}
+            result = subprocess.run(
+                [str(installer)],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            installed = (
+                data_home
+                / "gnome-shell/extensions"
+                / "spotlight-desktop@mosesyyoung"
+            )
+
+            self.assertTrue((installed / "metadata.json").is_file())
+            self.assertTrue((installed / "extension.js").is_file())
+            self.assertTrue((installed / "stylesheet.css").is_file())
+            self.assertIn("gnome-extensions enable", result.stdout)
 
     def test_choose_wallpaper_uses_supported_images_only(self):
         with tempfile.TemporaryDirectory() as output:
@@ -165,8 +284,9 @@ class ResolutionSelectionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "no wallpaper images"):
                 choose_wallpaper(output)
 
+    @patch("spotlight_downloader.write_current_wallpaper_state")
     @patch("spotlight_downloader.subprocess.run")
-    def test_sets_gnome_light_and_dark_wallpapers(self, run):
+    def test_sets_gnome_light_and_dark_wallpapers(self, run, write_state):
         with tempfile.TemporaryDirectory() as output:
             image = Path(output) / "wallpaper with spaces.jpg"
             image.write_bytes(b"image")
@@ -181,6 +301,7 @@ class ResolutionSelectionTests(unittest.TestCase):
             result = set_gnome_wallpaper(image)
 
         self.assertEqual(result, image.resolve())
+        write_state.assert_called_once_with(image.resolve())
         self.assertEqual(
             run.call_args_list,
             [
@@ -233,8 +354,11 @@ class ResolutionSelectionTests(unittest.TestCase):
             ],
         )
 
+    @patch("spotlight_downloader.write_current_wallpaper_state")
     @patch("spotlight_downloader.subprocess.run")
-    def test_detects_dconf_commit_warning_with_success_status(self, run):
+    def test_detects_dconf_commit_warning_with_success_status(
+        self, run, write_state
+    ):
         run.return_value = subprocess.CompletedProcess(
             [],
             0,
@@ -249,9 +373,40 @@ class ResolutionSelectionTests(unittest.TestCase):
                 set_gnome_wallpaper(image)
 
         self.assertEqual(run.call_count, 1)
+        write_state.assert_not_called()
 
     @patch("spotlight_downloader.subprocess.run")
-    def test_detects_wallpaper_setting_that_was_not_applied(self, run):
+    def test_successful_wallpaper_update_writes_current_state(self, run):
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            image = temporary_path / "wallpaper.jpg"
+            image.write_bytes(b"image")
+            Path(f"{image}.json").write_text(
+                json.dumps({"title": "Current Spotlight"}),
+                encoding="utf-8",
+            )
+            uri = image.resolve().as_uri()
+            run.side_effect = [
+                subprocess.CompletedProcess([], 0, "", ""),
+                subprocess.CompletedProcess([], 0, "", ""),
+                subprocess.CompletedProcess([], 0, repr(uri), ""),
+                subprocess.CompletedProcess([], 0, repr(uri), ""),
+            ]
+
+            state_home = temporary_path / "state"
+            with patch.dict(os.environ, {"XDG_STATE_HOME": str(state_home)}):
+                set_gnome_wallpaper(image)
+
+            state_file = state_home / "spotlight-desktop/current.json"
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(state["image"], str(image.resolve()))
+            self.assertEqual(state["title"], "Current Spotlight")
+
+    @patch("spotlight_downloader.write_current_wallpaper_state")
+    @patch("spotlight_downloader.subprocess.run")
+    def test_detects_wallpaper_setting_that_was_not_applied(
+        self, run, write_state
+    ):
         run.side_effect = [
             subprocess.CompletedProcess([], 0, "", ""),
             subprocess.CompletedProcess([], 0, "", ""),
@@ -263,6 +418,8 @@ class ResolutionSelectionTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "was not applied"):
                 set_gnome_wallpaper(image)
+
+        write_state.assert_not_called()
 
     @patch("spotlight_downloader.subprocess.run")
     def test_rejects_missing_wallpaper_before_changing_settings(self, run):

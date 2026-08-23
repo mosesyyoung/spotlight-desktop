@@ -9,6 +9,7 @@ import random
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -27,7 +28,9 @@ MAX_STALE_BATCHES = 5
 RESOLUTION_PATTERN = re.compile(r"(?<!\d)(\d{3,5})x(\d{3,5})(?!\d)", re.IGNORECASE)
 WALLPAPER_EXTENSIONS = frozenset((".jpg", ".jpeg", ".png", ".webp"))
 GNOME_BACKGROUND_SCHEMA = "org.gnome.desktop.background"
-__version__ = "1.1.0"
+CURRENT_STATE_DIRECTORY = "spotlight-desktop"
+CURRENT_STATE_FILENAME = "current.json"
+__version__ = "1.2.0"
 
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -52,6 +55,91 @@ def choose_wallpaper(directory):
     if not images:
         raise RuntimeError(f"no wallpaper images found in {directory}")
     return random.choice(images)
+
+
+def current_state_file():
+    """Return the XDG-compliant path for the current wallpaper state."""
+    state_home = os.environ.get("XDG_STATE_HOME")
+    if state_home:
+        state_directory = Path(state_home).expanduser()
+    else:
+        state_directory = Path.home() / ".local" / "state"
+    return state_directory / CURRENT_STATE_DIRECTORY / CURRENT_STATE_FILENAME
+
+
+def metadata_file_for_image(image):
+    """Return the per-image metadata path used by the download archive."""
+    image = Path(image)
+    return image.with_name(f"{image.name}.json")
+
+
+def current_wallpaper_state(image):
+    """Build the state exposed to desktop integrations for one image."""
+    image = Path(image).expanduser().resolve()
+    metadata_file = metadata_file_for_image(image)
+    metadata = None
+
+    if metadata_file.is_file():
+        try:
+            metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            if not isinstance(metadata, dict):
+                raise ValueError("expected a JSON object")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(
+                f"Warning: cannot read wallpaper metadata {metadata_file}: {exc}",
+                file=sys.stderr,
+            )
+            metadata = None
+
+    state = {
+        "image": str(image),
+        "updated_at": datetime.now().astimezone().isoformat(),
+    }
+    if metadata is not None:
+        state["metadata"] = str(metadata_file)
+        for field in ("title", "description", "copyright", "location", "url"):
+            value = metadata.get(field)
+            if isinstance(value, str) and value.strip():
+                state[field] = value
+    return state
+
+
+def write_current_wallpaper_state(image, state_file=None):
+    """Atomically write current.json after a wallpaper was applied."""
+    image = Path(image).expanduser().resolve()
+    if not image.is_file():
+        raise RuntimeError(f"wallpaper image does not exist: {image}")
+
+    state_file = Path(state_file) if state_file else current_state_file()
+    state_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp_file = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=state_file.parent,
+            prefix=f".{state_file.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as output_file:
+            temp_file = Path(output_file.name)
+            json.dump(
+                current_wallpaper_state(image),
+                output_file,
+                ensure_ascii=False,
+                indent=2,
+            )
+            output_file.write("\n")
+            output_file.flush()
+            os.fsync(output_file.fileno())
+        temp_file.chmod(0o600)
+        temp_file.replace(state_file)
+    finally:
+        if temp_file is not None:
+            temp_file.unlink(missing_ok=True)
+
+    return state_file
 
 
 def set_gnome_wallpaper(image):
@@ -109,6 +197,7 @@ def set_gnome_wallpaper(image):
             "an active GNOME desktop session"
         ) from exc
 
+    write_current_wallpaper_state(image)
     print("Wallpaper:", image)
     return image
 

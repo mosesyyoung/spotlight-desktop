@@ -1,275 +1,199 @@
 # Spotlight Desktop
 
-A modern Python implementation of Microsoft Windows Spotlight experience for Linux desktops.
+A lightweight Microsoft Windows Spotlight experience for Ubuntu/Linux
+desktops.
 
-Download, manage, and automatically apply beautiful Spotlight wallpapers without requiring Windows, .NET, or Mono.
+Spotlight Desktop downloads high-resolution Microsoft Spotlight images,
+deduplicates them using per-image metadata, applies new wallpapers through
+GNOME, and exposes information about the current image in the GNOME panel.
+
+```text
+Microsoft Spotlight
+        ↓
+4K wallpaper
+        ↓
+metadata-based deduplication
+        ↓
+GNOME wallpaper
+        ↓
+hourly automatic refresh
+        ↓
+GNOME Spotlight information
+```
 
 > Inspired by [ORelio/Spotlight-Downloader](https://github.com/ORelio/Spotlight-Downloader)
 
----
-
 ## Features
 
-Current MVP:
+- Microsoft Spotlight API integration with localization
+- 3840×2160 / 4K preference and lower-resolution fallback
+- Per-image JSON metadata and metadata-based download history
+- GNOME light and dark wallpaper integration
+- Hourly refresh through a systemd user timer
+- XDG-compatible `current.json` state for the active wallpaper
+- GNOME Shell Panel Indicator with a metadata popup
+- Automatic popup refresh through `Gio.FileMonitor`
 
-- ✅ Query Microsoft Windows Spotlight API
-- ✅ Download Spotlight wallpapers
-- ✅ Prefer 3840×2160 (4K), with lower-resolution fallback
-- ✅ Detect and record the downloaded image resolution
-- ✅ Support localization (country / locale)
-- ✅ Download metadata
-- ✅ Duplicate detection
-- ✅ Native Python implementation
-- ✅ No Mono / .NET dependency
-- ✅ GNOME light and dark wallpaper integration
-
-Example:
-
-```text
-Query Spotlight API...
-Found 4 images
-Download: 瞧瞧这张大嘴
-Download: 寂静的神圣建筑
-Download: 玫瑰色巨石
-Download: 河湾周边的景观
-```
-
----
-
-## Motivation
-
-The original Windows Spotlight downloader ecosystem is mainly based on Windows/.NET.
-
-The famous project:
-
-- ORelio/Spotlight-Downloader
-
-works very well on Windows, but Linux users need Mono compatibility.
-
-On modern Linux distributions:
-
-- Ubuntu 26.04
-
-- Mono 6.x
-
-- New Microsoft TLS certificate chain
-
-may cause HTTPS certificate validation problems:
-
-```text
-System.Net.WebException:  
-
-TrustFailure  
-(Authentication failed)
-```
-
-This project uses Python and the system OpenSSL stack instead:
-
-```text
-Python  
-|  
-requests  
-|  
-OpenSSL  
-|  
-Microsoft Spotlight API
-```
-
-No Mono required.
-
----
+The primary desktop target is Ubuntu 26.04 with GNOME Shell 50 on Wayland.
+Downloading also works on other Linux desktops with Python, while wallpaper and
+panel integration require GNOME. No Conky service is used.
 
 ## Requirements
 
-Supported:
-
-- Ubuntu 22.04+
-
-- Ubuntu 24.04
-
-- Ubuntu 26.04
-
-- Other Linux distributions with Python 3
-
-Required software:
-
-- Python >= 3.10
-
-- python3-venv
-
-- pip
-
-GNOME wallpaper integration additionally requires:
-
-- An active GNOME desktop session
-
+- Python 3.10 or newer
+- `python3-venv` and `pip`
+- An active GNOME session for wallpaper integration
 - `gsettings` (provided by `libglib2.0-bin` on Ubuntu)
+- GNOME Shell 50 for the included extension
 
-- Access to the session's D-Bus/dconf services; wallpaper changes will not work
-  from a plain SSH session or a timer that is not connected to the desktop
-  session
-
----
-
-## Installation
-
-### 1. Install Python environment
-
-Ubuntu:
+Install the base Ubuntu packages:
 
 ```bash
 sudo apt update
-
-sudo apt install \
-    python3 \
-    python3-venv
+sudo apt install python3 python3-venv libglib2.0-bin
 ```
 
-Check:
-
-```bash
-python3 --version
-```
-
----
-
-### 2. Clone project
+## Installation
 
 ```bash
 git clone https://github.com/mosesyyoung/spotlight-desktop.git
-
 cd spotlight-desktop
-```
 
----
-
-### 3. Create virtual environment
-
-Recommended:
-
-```bash
 python3 -m venv .venv
-```
-
-Activate:
-
-```bash
 source .venv/bin/activate
-```
-
-Your shell should become:
-
-```
-(.venv) user@host:~/spotlight-desktop$
-```
-
----
-
-### 4. Install dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-Current dependencies:
+Runtime Python dependencies are listed in `requirements.txt`:
 
-```
+```text
 requests>=2.31.0
 urllib3>=1.26.0
 Pillow>=10.0.0
 ```
 
----
+## Command-line usage
 
-## Usage
-
-Default:
+Download Spotlight wallpapers to the default archive:
 
 ```bash
 python spotlight_downloader.py
 ```
 
-Default output:
+The default archive is `~/Pictures/SpotlightArchive`. Each image is stored next
+to its metadata:
 
-```
-~/Pictures/SpotlightArchive
-```
-
-Example:
-
-```
+```text
 SpotlightArchive/
-
-├── 20260822_015300_xxxxxxxx.jpg
-
-└── 20260822_015300_xxxxxxxx.jpg.json
+├── 20260823_200000_12345678.jpg
+└── 20260823_200000_12345678.jpg.json
 ```
 
----
+Available options:
 
-## Options
+| Option                  | Description                                      | Default                     |
+| ----------------------- | ------------------------------------------------ | --------------------------- |
+| `--output DIRECTORY`    | Wallpaper archive                                | `~/Pictures/SpotlightArchive` |
+| `--count NUMBER`        | Number of Spotlight results                      | `10`                        |
+| `--country CODE`        | Spotlight country code                           | `CN`                        |
+| `--locale LOCALE`       | Spotlight language locale                        | `zh-CN`                     |
+| `--set-wallpaper [IMAGE]` | Set a specific image or a random archive image | Disabled                    |
+| `--refresh`             | Apply a wallpaper only when new images download  | Disabled                    |
+| `--version`             | Print the installed version                      | —                           |
 
-Example:
-
-```bash
-python spotlight_downloader.py \
-    --count 20 \
-    --country CN \
-    --locale zh-CN
-```
-
-Parameters:
-
-| Option                  | Description          | Default                     |
-| ----------------------- | -------------------- | --------------------------- |
-| --output                | Output directory     | ~/Pictures/SpotlightArchive |
-| --count                 | Number of wallpapers | 10                          |
-| --country               | Country code         | CN                          |
-| --locale                | Language locale      | zh-CN                       |
-| --set-wallpaper [IMAGE] | Set GNOME wallpaper  | Disabled                    |
-| --refresh               | Set a new download    | Disabled                    |
-| --version               | Show program version | —                           |
-
-The Spotlight API returns at most four images per request. Larger `--count`
-values are fetched automatically in multiple batches and deduplicated by URL.
-
-To download wallpapers and set a random image from the output directory for
-both GNOME's light and dark appearances:
+Examples:
 
 ```bash
+# Download 20 localized images
+python spotlight_downloader.py --count 20 --country CN --locale zh-CN
+
+# Download, then select a random image from the archive
 python spotlight_downloader.py --set-wallpaper
-```
 
-To use a specific image instead:
-
-```bash
+# Set a local image without contacting the Spotlight API
 python spotlight_downloader.py --set-wallpaper ~/Pictures/wallpaper.jpg
-```
 
-When `IMAGE` is provided, the wallpaper is changed immediately without
-contacting the Spotlight API or downloading new images.
-
-Wallpaper integration uses GNOME's `picture-uri` and `picture-uri-dark`
-settings. It requires `gsettings` and an active GNOME desktop session so the
-command can reach the user's D-Bus/dconf settings database.
-
-To check for new images once and change the wallpaper only when a new image was
-downloaded:
-
-```bash
+# Check once and change the wallpaper only if a new image is downloaded
 python spotlight_downloader.py --refresh
 ```
 
-Known images are identified through their existing metadata files and are not
-downloaded again. If every image returned by Spotlight is already in the
-archive, `--refresh` leaves the current wallpaper unchanged.
+`--set-wallpaper` and `--refresh` set both GNOME `picture-uri` and
+`picture-uri-dark`. Run them from an active desktop session so `gsettings` can
+reach the user's D-Bus/dconf services.
 
----
+## Metadata and download history
 
-## Scheduled refresh
+Spotlight Desktop does not use SQLite or a shared download-history database.
+Every downloaded image has one adjacent metadata JSON file, and those files are
+scanned at startup to avoid downloading known URLs.
 
-The included user-level systemd timer runs the refresh command hourly. Install
-the application and units into the paths expected by the service:
+The existing metadata format is preserved:
+
+```json
+{
+  "url": "https://res.public.onecdn.static.microsoft/...",
+  "candidates": [
+    {
+      "url": "https://res.public.onecdn.static.microsoft/..._3840x2160.jpg",
+      "width": 3840,
+      "height": 2160
+    }
+  ],
+  "title": "Example title",
+  "copyright": "© Photographer / Getty Images",
+  "description": "Example description",
+  "width": 3840,
+  "height": 2160,
+  "resolution": "3840x2160",
+  "is_4k": true,
+  "download_time": "2026-08-23T20:00:00",
+  "file": "20260823_200000_12345678.jpg"
+}
+```
+
+Fields supplied by Microsoft may be absent. Image dimensions are read from the
+downloaded image rather than trusted from an API filename.
+
+## Current wallpaper state
+
+After GNOME confirms that both wallpaper settings were applied, Spotlight
+Desktop atomically writes its state file.
+
+When `XDG_STATE_HOME` is set, the path is
+`$XDG_STATE_HOME/spotlight-desktop/current.json`. Otherwise it is
+`~/.local/state/spotlight-desktop/current.json`.
+
+This is a small interface describing the current wallpaper, not a download
+database. A typical file is:
+
+```json
+{
+  "image": "/home/user/Pictures/SpotlightArchive/example.jpg",
+  "metadata": "/home/user/Pictures/SpotlightArchive/example.jpg.json",
+  "title": "Example title",
+  "description": "Example description",
+  "copyright": "© Photographer / Getty Images",
+  "url": "https://res.public.onecdn.static.microsoft/...",
+  "updated_at": "2026-08-23T20:00:00+08:00"
+}
+```
+
+`image` and `updated_at` are always present. `metadata`, `title`, `description`,
+`copyright`, `location`, and `url` are included only when valid values exist.
+Spotlight Desktop does not infer a location from titles or descriptions.
+
+The file is written as UTF-8 through a temporary file followed by an atomic
+rename. A failed GNOME wallpaper update leaves the previous `current.json`
+untouched.
+
+## Hourly systemd refresh
+
+The included systemd user timer checks for new Spotlight images every hour. If
+new files are downloaded, one of those files is applied and `current.json` is
+updated. If all returned images already exist, neither the wallpaper nor
+`current.json` changes.
+
+Install the backend and timer into the paths used by the supplied service:
 
 ```bash
 install -Dm755 spotlight_downloader.py \
@@ -290,158 +214,147 @@ systemctl --user daemon-reload
 systemctl --user enable --now spotlight-desktop.timer
 ```
 
-The service uses the default `~/Pictures/SpotlightArchive` directory. It runs
-inside the logged-in user's systemd manager so `gsettings` can access the GNOME
-session. Check the schedule and recent logs with:
+Inspect or manually trigger the service:
 
 ```bash
 systemctl --user list-timers spotlight-desktop.timer
+systemctl --user start spotlight-desktop.service
 journalctl --user -u spotlight-desktop.service
 ```
 
-Run an immediate refresh with:
+## GNOME Spotlight Information extension
+
+The extension targets Ubuntu 26.04, GNOME Shell 50, and Wayland. It adds a
+lightweight information icon to the right side of the top panel. The popup
+shows only fields present in `current.json`, wraps long descriptions, supports
+UTF-8 text, and displays a fallback message before Spotlight Desktop has set a
+wallpaper.
+
+Install the extension for the current user:
 
 ```bash
-systemctl --user start spotlight-desktop.service
+./scripts/install-gnome-extension.sh
+gnome-extensions enable spotlight-desktop@mosesyyoung
 ```
 
----
+If GNOME Shell has not discovered a newly installed extension, log out and log
+back in before running the enable command. The installer never writes to
+`/usr/share` and does not require root.
 
-## Metadata
+Inspect its state:
 
-The downloader first uses the v4 Spotlight feed for 3840×2160 images. If that
-feed or a 4K asset is unavailable, it falls back to the v3 feed's lower-resolution
-wallpapers. Legacy placeholder assets are ignored.
-
-Each image's JSON metadata includes its detected `width`, `height`, `resolution`,
-and `is_4k` values. These dimensions are read from the downloaded image itself,
-not trusted from the filename or API response.
-
-The per-image JSON files also serve as download history. At startup, the
-downloader scans existing metadata and skips known asset URLs when the matching
-image is still present. Invalid metadata is ignored with a warning.
-
-For every downloaded image:
-
-Example:
-
-```json
-{
-  "url": "https://res.public.onecdn.static.microsoft/...",
-  "title": "玫瑰色巨石",
-  "copyright": "© Microsoft",
-  "description": "...",
-  "width": 3840,
-  "height": 2160,
-  "resolution": "3840x2160",
-  "is_4k": true,
-  "download_time": "2026-08-22T01:30:00",
-  "file": "20260822_013000_xxxxxxxx.jpg"
-}
+```bash
+gnome-extensions list
+gnome-extensions info spotlight-desktop@mosesyyoung
+journalctl --user -f -o cat /usr/bin/gnome-shell
 ```
 
----
+The extension monitors the XDG state directory with `Gio.FileMonitor`. Updating
+`current.json` refreshes the popup immediately, including while it is open; no
+polling, Shell restart, or manual metadata refresh is required. Missing state
+shows an unavailable message. Invalid JSON is logged without crashing GNOME
+Shell, and the last successfully loaded information remains visible.
+
+### Extension test checklist
+
+1. Run `python spotlight_downloader.py --set-wallpaper IMAGE` for an archived
+   Spotlight image and inspect `~/.local/state/spotlight-desktop/current.json`.
+2. Install and enable the extension; confirm the panel indicator appears.
+3. Open the popup and compare its text with `current.json`.
+4. Replace `current.json` with another valid state file and confirm the open
+   popup refreshes.
+5. Disable the extension and confirm the indicator disappears:
+
+   ```bash
+   gnome-extensions disable spotlight-desktop@mosesyyoung
+   ```
+
+6. Enable it again and confirm only one indicator appears.
+
+For isolated Wayland testing on GNOME 49 or newer, GNOME documents a nested
+development session using `mutter-devkit` (`mutter-dev-bin` on Ubuntu):
+
+```bash
+dbus-run-session gnome-shell --devkit --wayland
+```
+
+## Repository layout
+
+```text
+spotlight-desktop/
+├── spotlight_downloader.py
+├── requirements.txt
+├── systemd/
+│   ├── spotlight-desktop.service
+│   └── spotlight-desktop.timer
+├── gnome-extension/
+│   └── spotlight-desktop@mosesyyoung/
+│       ├── metadata.json
+│       ├── extension.js
+│       └── stylesheet.css
+├── scripts/
+│   └── install-gnome-extension.sh
+└── tests/
+    └── test_resolution.py
+```
 
 ## Project Roadmap
 
 ### v1.0 MVP
 
-Completed:
-
 - [x] Microsoft Spotlight API integration
 - [x] Wallpaper download
 - [x] Metadata export
-- [x] Duplicate detection
-
----
+- [x] Basic duplicate detection
 
 ### v1.1 Desktop Integration
 
-Completed:
-
-#### Resolution handling
-
-- [x] Detect original image resolution
-- [x] Prefer 3840x2160 / 4K images
-- [x] Fallback to lower resolution
-
-#### Download management
-
-- [x] Remove `downloaded.json`
-- [x] Use image metadata JSON files as download history
-- [x] Scan existing metadata before downloading
-- [x] Avoid duplicate downloads
-
-#### GNOME integration
-
-- [x] Automatically set the GNOME wallpaper
-- [x] Support light and dark wallpaper settings
-- [x] Provide a `--set-wallpaper [IMAGE]` CLI option
-
-When `IMAGE` is provided, use that image. When the option is used without an
-image, choose a random image from the output directory.
-
-Example:
-
-```bash
-gsettings set org.gnome.desktop.background picture-uri \
-    file:///path/to/image.jpg
-gsettings set org.gnome.desktop.background picture-uri-dark \
-    file:///path/to/image.jpg
-```
-
----
+- [x] Resolution detection
+- [x] Prefer 3840×2160 / 4K wallpapers
+- [x] Fallback to lower resolutions
+- [x] Metadata-based duplicate detection
+- [x] Remove standalone `downloaded.json`
+- [x] GNOME wallpaper integration
+- [x] GNOME light/dark wallpaper support
 
 ### v1.2 Automation
 
-Completed:
-
-#### Scheduled wallpaper refresh
-
-- [x] systemd timer support
-- [x] Hourly update check
+- [x] systemd user timer
+- [x] Hourly Spotlight update checks
 - [x] Download only new wallpapers
-- [x] Automatically set a newly downloaded wallpaper
+- [x] Automatically apply a new wallpaper
 
-If new wallpapers are available, download them and set one as the wallpaper.
-If no new wallpaper is available, make no changes.
+### v1.3 GNOME Spotlight Information
 
-## Future ideas
+- [x] `current.json` desktop state interface
+- [x] GNOME Shell Panel Indicator
+- [x] Spotlight metadata popup
+- [x] Automatic metadata refresh with `Gio.FileMonitor`
 
-- Desktop information overlay
-- GNOME Extension integration
+## Development and testing
 
----
-
-## Development
-
-Run:
+Run the automated checks:
 
 ```bash
 source .venv/bin/activate
-
-python spotlight_downloader.py
+python -m unittest discover -s tests -v
+python -m py_compile spotlight_downloader.py
+node --check \
+    gnome-extension/spotlight-desktop@mosesyyoung/extension.js
+sh -n scripts/install-gnome-extension.sh
+gnome-extensions pack --force \
+    gnome-extension/spotlight-desktop@mosesyyoung
+systemd-analyze --user verify \
+    systemd/spotlight-desktop.service \
+    systemd/spotlight-desktop.timer
 ```
-
-Format:
-
-Future:
-
-- ruff
-- black
-- pytest
-
----
 
 ## License
 
-MIT License
-
----
+MIT License. See [LICENSE](LICENSE).
 
 ## Acknowledgements
 
-Thanks to:
-
-- Microsoft Windows Spotlight API
-- ORelio/Spotlight-Downloader
+- Microsoft Spotlight
+- [ORelio/Spotlight-Downloader](https://github.com/ORelio/Spotlight-Downloader)
+- GNOME Shell and GJS
