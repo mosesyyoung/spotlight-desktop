@@ -13,6 +13,12 @@ const MAX_STALE_BATCHES = 5;
 const DEFAULT_COUNT = 10;
 const DEFAULT_COUNTRY = 'CN';
 const DEFAULT_LOCALE = 'zh-CN';
+const DEFAULT_WALLPAPER_BEHAVIOR = 'download-only';
+const WALLPAPER_BEHAVIORS = new Set([
+    'download-only',
+    'random-archive',
+    'new-download',
+]);
 const MAX_REQUEST_ATTEMPTS = 3;
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) SpotlightDesktop/1.4';
 const IMAGE_ATTRIBUTES = 'standard::name,standard::type';
@@ -209,6 +215,21 @@ function defaultArchiveDirectory() {
 }
 
 
+function archiveDirectory(configuredPath) {
+    if (!validText(configuredPath))
+        return defaultArchiveDirectory();
+
+    let path = configuredPath.trim();
+    if (path === '~')
+        path = GLib.get_home_dir();
+    else if (path.startsWith('~/'))
+        path = GLib.build_filenamev([GLib.get_home_dir(), path.slice(2)]);
+    else if (!GLib.path_is_absolute(path))
+        path = GLib.build_filenamev([GLib.get_home_dir(), path]);
+    return Gio.File.new_for_path(GLib.canonicalize_filename(path, null));
+}
+
+
 function currentStateFile() {
     const stateHome = GLib.getenv('XDG_STATE_HOME') ??
         GLib.build_filenamev([GLib.get_home_dir(), '.local', 'state']);
@@ -258,10 +279,20 @@ async function replaceContents(file, contents, cancellable) {
 
 export class SpotlightRefresher {
     constructor(params = {}) {
-        this._count = params.count ?? DEFAULT_COUNT;
-        this._country = params.country ?? DEFAULT_COUNTRY;
-        this._locale = params.locale ?? DEFAULT_LOCALE;
-        this._output = params.output ?? defaultArchiveDirectory();
+        this._count = Number.isInteger(params.count) && params.count >= 1 &&
+            params.count <= 50 ? params.count : DEFAULT_COUNT;
+        this._country = /^[A-Za-z]{2}$/.test(params.country ?? '')
+            ? params.country.toUpperCase()
+            : DEFAULT_COUNTRY;
+        this._locale = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(
+            params.locale ?? ''
+        ) ? params.locale : DEFAULT_LOCALE;
+        this._output = params.output?.get_path
+            ? params.output
+            : archiveDirectory(params.output);
+        this._wallpaperBehavior = WALLPAPER_BEHAVIORS.has(
+            params.wallpaperBehavior
+        ) ? params.wallpaperBehavior : DEFAULT_WALLPAPER_BEHAVIOR;
         this._stateFile = currentStateFile();
         this._session = new Soup.Session({
             user_agent: USER_AGENT,
@@ -340,22 +371,24 @@ export class SpotlightRefresher {
             }
         }
 
-        if (downloaded.length > 0) {
+        if (this._wallpaperBehavior === 'new-download' &&
+            downloaded.length > 0) {
             const selected = downloaded[Math.floor(Math.random() * downloaded.length)];
             await this._applyWallpaper(selected.file, selected.metadata, cancellable);
-            return {changed: true, downloaded: downloaded.length};
+            return {applied: 'new-download', downloaded: downloaded.length};
         }
 
-        if (!this._stateFile.query_exists(cancellable) && this._archiveImages.size > 0) {
+        if (this._wallpaperBehavior === 'random-archive' &&
+            this._archiveImages.size > 0) {
             const archived = [...this._archiveImages.values()];
             const selected = archived[Math.floor(Math.random() * archived.length)];
             await this._applyWallpaper(selected.file, selected.metadata, cancellable);
-            return {changed: true, downloaded: 0, restored: true};
+            return {applied: 'random-archive', downloaded: downloaded.length};
         }
 
-        if (failures.length === images.length)
+        if (downloaded.length === 0 && failures.length === images.length)
             throw new Error('all wallpaper downloads failed');
-        return {changed: false, downloaded: 0};
+        return {applied: null, downloaded: downloaded.length};
     }
 
     _ensureDirectories() {
@@ -393,9 +426,23 @@ export class SpotlightRefresher {
 
                 for (const info of infos) {
                     const name = info.get_name();
-                    if (info.get_file_type() !== Gio.FileType.REGULAR ||
-                        !name.endsWith('.jpg.json'))
+                    if (info.get_file_type() !== Gio.FileType.REGULAR)
                         continue;
+
+                    if (/\.(?:jpe?g|png|webp)$/i.test(name)) {
+                        const imageFile = this._output.get_child(name);
+                        const archived = this._archiveImages.get(
+                            imageFile.get_path()
+                        );
+                        this._archiveImages.set(
+                            imageFile.get_path(),
+                            {file: imageFile, metadata: archived?.metadata ?? null}
+                        );
+                        continue;
+                    }
+                    if (!/\.(?:jpe?g|png|webp)\.json$/i.test(name))
+                        continue;
+
                     const metadataFile = this._output.get_child(name);
                     const imageFile = this._output.get_child(name.slice(0, -5));
                     if (!imageFile.query_exists(cancellable))
@@ -408,8 +455,10 @@ export class SpotlightRefresher {
                         const urls = metadataUrls(metadata);
                         for (const url of urls)
                             this._history.set(url, imageFile);
-                        if (urls.length > 0)
-                            this._archiveImages.set(imageFile.get_path(), {file: imageFile, metadata});
+                        this._archiveImages.set(
+                            imageFile.get_path(),
+                            {file: imageFile, metadata}
+                        );
                     } catch (error) {
                         if (isCancelled(error))
                             throw error;

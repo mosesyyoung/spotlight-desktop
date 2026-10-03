@@ -17,12 +17,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   preferred-resolution fallback, and direct GNOME wallpaper integration.
 - Extension-managed refresh on enable and every hour, with no Python or
   systemd dependency.
+- A native preferences window for the archive directory, refresh interval,
+  result count, country, locale, and wallpaper behavior.
 
 ### Changed
 
 - Aligned the reported CLI version with the latest `v1.2.0` release.
 - Made the GNOME extension the primary installation path while retaining the
   Python CLI and systemd units as optional compatibility tools.
+- Defaulted the extension to downloading without changing the wallpaper;
+  random archive selection and newly downloaded wallpaper application are
+  available as mutually exclusive preferences.
 
 ### Fixed
 

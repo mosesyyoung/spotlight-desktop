@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.spotlight-desktop"
+          path="/org/gnome/shell/extensions/spotlight-desktop/">
+    <key name="output-directory" type="s">
+      <default>''</default>
+      <summary>Wallpaper archive directory</summary>
+      <description>An empty value uses the XDG Pictures directory followed by SpotlightArchive.</description>
+    </key>
+    <key name="refresh-interval" type="u">
+      <default>3600</default>
+      <summary>Refresh interval in seconds</summary>
+      <description>Zero refreshes only when the extension is enabled.</description>
+    </key>
+    <key name="result-count" type="u">
+      <default>10</default>
+      <range min="1" max="50"/>
+      <summary>Number of Spotlight results per check</summary>
+    </key>
+    <key name="country-code" type="s">
+      <default>'CN'</default>
+      <summary>Two-letter Spotlight country code</summary>
+    </key>
+    <key name="locale" type="s">
+      <default>'zh-CN'</default>
+      <summary>Language and locale sent to Spotlight</summary>
+    </key>
+    <key name="wallpaper-behavior" type="s">
+      <default>'download-only'</default>
+      <summary>Action to take after checking for wallpapers</summary>
+      <choices>
+        <choice value="download-only"/>
+        <choice value="random-archive"/>
+        <choice value="new-download"/>
+      </choices>
+    </key>
+  </schema>
+</schemalist>

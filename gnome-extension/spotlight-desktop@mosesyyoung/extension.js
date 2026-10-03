@@ -13,7 +13,6 @@ import {SpotlightRefresher} from './spotlight.js';
 
 const STATE_DIRECTORY = 'spotlight-desktop';
 const STATE_FILENAME = 'current.json';
-const REFRESH_INTERVAL_SECONDS = 60 * 60;
 
 
 export default class SpotlightInformationExtension extends Extension {
@@ -25,8 +24,13 @@ export default class SpotlightInformationExtension extends Extension {
         this._refreshStatus = null;
         this._refreshPromise = null;
         this._refreshTimerId = null;
-        this._cancellable = new Gio.Cancellable();
-        this._refresher = new SpotlightRefresher();
+        this._cancellable = null;
+        this._refresher = null;
+        this._settings = this.getSettings();
+        this._settingsChangedId = this._settings.connect(
+            'changed::refresh-interval',
+            () => this._scheduleRefresh()
+        );
         this._stateDirectory = null;
         this._stateFile = null;
         this._monitor = null;
@@ -46,14 +50,7 @@ export default class SpotlightInformationExtension extends Extension {
         this._setupStateMonitor();
         this._loadState();
         this._startRefresh();
-        this._refreshTimerId = GLib.timeout_add_seconds(
-            GLib.PRIORITY_DEFAULT,
-            REFRESH_INTERVAL_SECONDS,
-            () => {
-                this._startRefresh();
-                return GLib.SOURCE_CONTINUE;
-            }
-        );
+        this._scheduleRefresh();
     }
 
     disable() {
@@ -69,6 +66,11 @@ export default class SpotlightInformationExtension extends Extension {
         this._refresher = null;
         this._refreshPromise = null;
         this._refreshStatus = null;
+        if (this._settings && this._settingsChangedId) {
+            this._settings.disconnect(this._settingsChangedId);
+            this._settingsChangedId = null;
+        }
+        this._settings = null;
 
         if (this._monitor && this._monitorChangedId) {
             this._monitor.disconnect(this._monitorChangedId);
@@ -85,19 +87,59 @@ export default class SpotlightInformationExtension extends Extension {
         this._indicator = null;
     }
 
+    _scheduleRefresh() {
+        if (this._refreshTimerId) {
+            GLib.Source.remove(this._refreshTimerId);
+            this._refreshTimerId = null;
+        }
+        if (!this._enabled || !this._settings)
+            return;
+
+        const interval = this._settings.get_uint('refresh-interval');
+        if (interval === 0)
+            return;
+        this._refreshTimerId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            interval,
+            () => {
+                this._startRefresh();
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+    }
+
     _startRefresh() {
         if (!this._enabled || this._refreshPromise)
             return;
 
         const generation = this._generation;
+        const cancellable = new Gio.Cancellable();
+        const refresher = new SpotlightRefresher({
+            output: this._settings.get_string('output-directory'),
+            count: this._settings.get_uint('result-count'),
+            country: this._settings.get_string('country-code'),
+            locale: this._settings.get_string('locale'),
+            wallpaperBehavior: this._settings.get_string(
+                'wallpaper-behavior'
+            ),
+        });
+        this._cancellable = cancellable;
+        this._refresher = refresher;
         this._refreshStatus = 'Checking for new wallpapers…';
         this._renderMenu();
 
-        const operation = this._runRefresh(generation);
+        const operation = this._runRefresh(
+            generation,
+            refresher,
+            cancellable
+        );
         this._refreshPromise = operation;
         const clearOperation = () => {
-            if (this._refreshPromise === operation)
+            if (this._refreshPromise === operation) {
                 this._refreshPromise = null;
+                this._cancellable = null;
+                this._refresher = null;
+            }
         };
         operation.then(clearOperation, error => {
             clearOperation();
@@ -107,18 +149,23 @@ export default class SpotlightInformationExtension extends Extension {
         });
     }
 
-    async _runRefresh(generation) {
+    async _runRefresh(generation, refresher, cancellable) {
         try {
-            const result = await this._refresher.refresh(this._cancellable);
+            const result = await refresher.refresh(cancellable);
             if (!this._enabled || generation !== this._generation)
                 return;
 
-            if (result.downloaded > 0) {
+            if (result.applied === 'random-archive') {
+                this._refreshStatus = result.downloaded > 0
+                    ? `Downloaded ${result.downloaded} new ${this._wallpaperNoun(result.downloaded)} and applied a random archive wallpaper.`
+                    : 'Applied a random wallpaper from the archive.';
+            } else if (result.applied === 'new-download') {
+                this._refreshStatus =
+                    `Downloaded and applied ${result.downloaded} new ${this._wallpaperNoun(result.downloaded)}.`;
+            } else if (result.downloaded > 0) {
                 const noun = result.downloaded === 1 ? 'wallpaper' : 'wallpapers';
                 this._refreshStatus =
-                    `Downloaded ${result.downloaded} new ${noun}.`;
-            } else if (result.restored) {
-                this._refreshStatus = 'Applied a wallpaper from the archive.';
+                    `Downloaded ${result.downloaded} new ${noun}; wallpaper unchanged.`;
             } else {
                 this._refreshStatus = 'No new wallpapers found.';
             }
@@ -129,6 +176,10 @@ export default class SpotlightInformationExtension extends Extension {
             console.error(`Spotlight Desktop: refresh failed: ${error.message}`);
         }
         this._renderMenu();
+    }
+
+    _wallpaperNoun(count) {
+        return count === 1 ? 'wallpaper' : 'wallpapers';
     }
 
     _setupStateMonitor() {

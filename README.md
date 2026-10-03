@@ -35,6 +35,8 @@ GNOME Spotlight information
 - XDG-compatible `current.json` state for the active wallpaper
 - GNOME Shell Panel Indicator with a metadata popup
 - Automatic popup refresh through `Gio.FileMonitor`
+- A native preferences window for download, schedule, locale, and wallpaper
+  behavior settings
 
 The primary desktop target is Ubuntu 26.04 with GNOME Shell 50 on Wayland. The
 GNOME extension uses only platform libraries provided by GNOME. The optional
@@ -60,8 +62,8 @@ gnome-extensions enable spotlight-desktop@mosesyyoung
 
 Enabling the extension immediately checks for new Spotlight images. While the
 extension remains enabled, it checks again every hour. Downloads are stored in
-`~/Pictures/SpotlightArchive`; new images are applied to both the light and dark
-GNOME background settings.
+the XDG Pictures directory under `SpotlightArchive`. By default the extension
+downloads new images without changing the wallpaper.
 
 If GNOME Shell has not discovered a newly installed extension, log out and log
 back in before running the enable command. The installer writes only to the
@@ -243,6 +245,29 @@ downloads asynchronously with libsoup, manages its own hourly refresh, and
 uses `Gio.Settings` to apply the wallpaper without spawning external commands.
 The popup shows download status and the metadata present in `current.json`.
 
+Open the preferences window from Extension Manager or from the command line:
+
+```bash
+gnome-extensions prefs spotlight-desktop@mosesyyoung
+```
+
+Available settings:
+
+| Setting | Default | Description |
+| ------- | ------- | ----------- |
+| Archive folder | `~/Pictures/SpotlightArchive` | Uses the localized XDG Pictures directory when unchanged |
+| Check for new wallpapers | Every hour | Also checks once whenever the extension is enabled |
+| Results per check | `10` | Accepts values from 1 through 50 |
+| Country code | `CN` | Two-letter Spotlight country code |
+| Language and locale | `zh-CN` | Locale sent to the Spotlight APIs |
+| After checking for wallpapers | Download only | Download only, choose a random archive image, or apply a newly downloaded image |
+
+The wallpaper behavior choices match the optional Python CLI: **Download only**
+performs no wallpaper action, **Set a random wallpaper from the archive** matches
+`--set-wallpaper` without an image argument, and **Apply a newly downloaded
+wallpaper** matches `--refresh`. Wallpaper changes update both `picture-uri` and
+`picture-uri-dark`.
+
 Inspect its state:
 
 ```bash
@@ -261,20 +286,23 @@ Shell, and the last successfully loaded information remains visible.
 
 1. Install and enable the extension; confirm the panel indicator appears and
    reports that it is checking for wallpapers.
-2. Confirm a wallpaper and adjacent metadata JSON appear in
+2. Confirm an image and adjacent metadata JSON appear in
    `~/Pictures/SpotlightArchive`.
-3. Confirm both light and dark GNOME backgrounds change and inspect
+3. Open the preferences window and select **Apply a newly downloaded
+   wallpaper**.
+4. Trigger another check by disabling and enabling the extension. Confirm both
+   light and dark GNOME backgrounds change and inspect
    `~/.local/state/spotlight-desktop/current.json`.
-4. Open the popup and compare its text with `current.json`.
-5. Replace `current.json` with another valid state file and confirm the open
+5. Open the popup and compare its text with `current.json`.
+6. Replace `current.json` with another valid state file and confirm the open
    popup refreshes.
-6. Disable the extension and confirm the indicator disappears:
+7. Disable the extension and confirm the indicator disappears:
 
    ```bash
    gnome-extensions disable spotlight-desktop@mosesyyoung
    ```
 
-7. Enable it again and confirm only one indicator and one refresh operation
+8. Enable it again and confirm only one indicator and one refresh operation
    appear.
 
 For isolated Wayland testing on GNOME 49 or newer, GNOME documents a nested
@@ -298,6 +326,9 @@ spotlight-desktop/
 │       ├── metadata.json
 │       ├── extension.js
 │       ├── spotlight.js
+│       ├── prefs.js
+│       ├── schemas/
+│       │   └── org.gnome.shell.extensions.spotlight-desktop.gschema.xml
 │       └── stylesheet.css
 ├── scripts/
 │   └── install-gnome-extension.sh
@@ -345,7 +376,7 @@ spotlight-desktop/
 - [x] Preserve metadata-based download history
 - [x] Apply light and dark wallpapers with `Gio.Settings`
 - [x] Refresh on enable and hourly without systemd
-- [ ] Add extension preferences for locale and refresh behavior
+- [x] Add extension preferences for locale and refresh behavior
 
 ## Development and testing
 
@@ -357,9 +388,13 @@ python -m unittest discover -s tests -v
 python -m py_compile spotlight_downloader.py
 node --check gnome-extension/spotlight-desktop@mosesyyoung/extension.js
 node --check gnome-extension/spotlight-desktop@mosesyyoung/spotlight.js
+node --check gnome-extension/spotlight-desktop@mosesyyoung/prefs.js
+glib-compile-schemas --strict --dry-run \
+    gnome-extension/spotlight-desktop@mosesyyoung/schemas
 sh -n scripts/install-gnome-extension.sh
 gnome-extensions pack --force \
     --extra-source=spotlight.js \
+    --schema=schemas/org.gnome.shell.extensions.spotlight-desktop.gschema.xml \
     gnome-extension/spotlight-desktop@mosesyyoung
 systemd-analyze --user verify \
     systemd/spotlight-desktop.service \

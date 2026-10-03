@@ -38,6 +38,7 @@ jobs:
         run: |
           node --check gnome-extension/spotlight-desktop@mosesyyoung/extension.js
           node --check gnome-extension/spotlight-desktop@mosesyyoung/spotlight.js
+          node --check gnome-extension/spotlight-desktop@mosesyyoung/prefs.js
 
       - name: Check installer shell syntax
         run: sh -n scripts/install-gnome-extension.sh

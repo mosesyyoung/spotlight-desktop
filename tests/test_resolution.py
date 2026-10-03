@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import Mock, call, patch
@@ -240,6 +241,10 @@ class ResolutionSelectionTests(unittest.TestCase):
 
         self.assertEqual(metadata["uuid"], "spotlight-desktop@mosesyyoung")
         self.assertEqual(metadata["shell-version"], ["50"])
+        self.assertEqual(
+            metadata["settings-schema"],
+            "org.gnome.shell.extensions.spotlight-desktop",
+        )
         self.assertIn("GLib.get_user_state_dir()", source)
         self.assertIn("monitor_directory", source)
         self.assertIn("this._monitor?.cancel()", source)
@@ -256,6 +261,34 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("replacementsNeeded", downloader)
         self.assertIn("this._count - downloaded.length", downloader)
         self.assertIn(".slice(0, this._count)", downloader)
+
+        prefs = (extension_directory / "prefs.js").read_text(encoding="utf-8")
+        self.assertIn("ExtensionPreferences", prefs)
+        self.assertIn("Archive folder", prefs)
+        self.assertIn("Every hour", prefs)
+        self.assertIn("Download only", prefs)
+
+    def test_gnome_extension_settings_defaults_match_cli(self):
+        project_root = Path(__file__).resolve().parents[1]
+        schema_file = (
+            project_root
+            / "gnome-extension"
+            / "spotlight-desktop@mosesyyoung"
+            / "schemas"
+            / "org.gnome.shell.extensions.spotlight-desktop.gschema.xml"
+        )
+        schema = ET.parse(schema_file).getroot().find("schema")
+        keys = {key.attrib["name"]: key for key in schema.findall("key")}
+
+        self.assertEqual(keys["output-directory"].findtext("default"), "''")
+        self.assertEqual(keys["refresh-interval"].findtext("default"), "3600")
+        self.assertEqual(keys["result-count"].findtext("default"), "10")
+        self.assertEqual(keys["country-code"].findtext("default"), "'CN'")
+        self.assertEqual(keys["locale"].findtext("default"), "'zh-CN'")
+        self.assertEqual(
+            keys["wallpaper-behavior"].findtext("default"),
+            "'download-only'",
+        )
 
     def test_gnome_extension_installer_uses_user_data_directory(self):
         project_root = Path(__file__).resolve().parents[1]
@@ -280,8 +313,18 @@ class ResolutionSelectionTests(unittest.TestCase):
             self.assertTrue((installed / "metadata.json").is_file())
             self.assertTrue((installed / "extension.js").is_file())
             self.assertTrue((installed / "spotlight.js").is_file())
+            self.assertTrue((installed / "prefs.js").is_file())
             self.assertTrue((installed / "stylesheet.css").is_file())
+            self.assertTrue(
+                (
+                    installed
+                    / "schemas"
+                    / "org.gnome.shell.extensions.spotlight-desktop.gschema.xml"
+                ).is_file()
+            )
+            self.assertTrue((installed / "schemas/gschemas.compiled").is_file())
             self.assertIn("gnome-extensions enable", result.stdout)
+            self.assertIn("gnome-extensions prefs", result.stdout)
 
     def test_choose_wallpaper_uses_supported_images_only(self):
         with tempfile.TemporaryDirectory() as output:
