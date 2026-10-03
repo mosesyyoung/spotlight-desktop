@@ -31,3 +31,14 @@
     font-size: 0.85em;
     opacity: 0.65;
 }
+
+.spotlight-information-thumbnail-item {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
+.spotlight-information-thumbnail-frame {
+    width: 360px;
+    height: 203px;
+    background-color: rgba(0, 0, 0, 0.12);
+}

@@ -26,7 +26,7 @@
       <summary>Language and locale sent to Spotlight</summary>
     </key>
     <key name="wallpaper-behavior" type="s">
-      <default>'download-only'</default>
+      <default>'new-download'</default>
       <summary>Action to take after checking for wallpapers</summary>
       <choices>
         <choice value="download-only"/>

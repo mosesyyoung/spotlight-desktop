@@ -5,5 +5,5 @@
   "shell-version": ["50"],
   "settings-schema": "org.gnome.shell.extensions.spotlight-desktop",
   "url": "https://github.com/mosesyyoung/spotlight-desktop",
-  "version": 3
+  "version": 4
 }

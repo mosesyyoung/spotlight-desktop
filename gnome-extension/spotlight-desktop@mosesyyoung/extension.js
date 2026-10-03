@@ -1,3 +1,4 @@
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
@@ -13,6 +14,8 @@ import {SpotlightRefresher} from './spotlight.js';
 
 const STATE_DIRECTORY = 'spotlight-desktop';
 const STATE_FILENAME = 'current.json';
+const THUMBNAIL_WIDTH = 360;
+const THUMBNAIL_HEIGHT = 203;
 
 
 export default class SpotlightInformationExtension extends Extension {
@@ -35,6 +38,10 @@ export default class SpotlightInformationExtension extends Extension {
         this._stateFile = null;
         this._monitor = null;
         this._monitorChangedId = null;
+        this._thumbnailPath = null;
+        this._thumbnailContent = null;
+        this._thumbnailLoader = null;
+        this._thumbnailLoaderChangedId = null;
 
         this._indicator = new PanelMenu.Button(
             0.0,
@@ -82,6 +89,7 @@ export default class SpotlightInformationExtension extends Extension {
         this._stateDirectory = null;
         this._currentState = null;
         this._lastReadError = null;
+        this._clearThumbnailCache();
 
         this._indicator?.destroy();
         this._indicator = null;
@@ -249,6 +257,11 @@ export default class SpotlightInformationExtension extends Extension {
         if (!this._indicator)
             return;
 
+        const imagePath = this._hasText(this._currentState?.image)
+            ? this._currentState.image.trim()
+            : null;
+        this._prepareThumbnail(imagePath);
+
         this._indicator.menu.removeAll();
         this._addText('Spotlight', 'spotlight-information-heading');
         if (this._hasText(this._refreshStatus))
@@ -280,10 +293,123 @@ export default class SpotlightInformationExtension extends Extension {
             'spotlight-information-copyright'
         );
 
-        if (this._hasText(this._currentState.image)) {
+        if (imagePath) {
+            this._addThumbnail();
             this._addText(
-                GLib.path_get_basename(this._currentState.image),
+                GLib.path_get_basename(imagePath),
                 'spotlight-information-file'
+            );
+        }
+    }
+
+    _prepareThumbnail(imagePath) {
+        if (imagePath !== this._thumbnailPath) {
+            this._clearThumbnailCache();
+            this._thumbnailPath = imagePath;
+        }
+        if (!imagePath || this._thumbnailContent || this._thumbnailLoader)
+            return;
+
+        const file = Gio.File.new_for_path(imagePath);
+        if (!file.query_exists(null))
+            return;
+
+        try {
+            const themeContext = St.ThemeContext.get_for_stage(global.stage);
+            const resourceScale = this._indicator.get_resource_scale();
+            const loader = St.TextureCache.get_default().load_file_async(
+                file,
+                THUMBNAIL_WIDTH,
+                THUMBNAIL_HEIGHT,
+                themeContext.scale_factor,
+                resourceScale
+            );
+            this._thumbnailLoader = loader;
+            if (loader.content) {
+                this._storeThumbnailContent(loader);
+                return;
+            }
+            this._thumbnailLoaderChangedId = loader.connect(
+                'notify::content',
+                actor => {
+                    if (actor !== this._thumbnailLoader || !actor.content)
+                        return;
+                    this._storeThumbnailContent(actor);
+                    if (this._enabled)
+                        this._renderMenu();
+                }
+            );
+        } catch (error) {
+            console.error(
+                `Spotlight Information: could not load thumbnail: ${error.message}`
+            );
+        }
+    }
+
+    _storeThumbnailContent(loader) {
+        const content = loader.content;
+        if (!content)
+            return;
+        if (this._thumbnailLoaderChangedId) {
+            loader.disconnect(this._thumbnailLoaderChangedId);
+            this._thumbnailLoaderChangedId = null;
+        }
+        loader.content = null;
+        loader.destroy();
+        this._thumbnailLoader = null;
+        this._thumbnailContent = content;
+    }
+
+    _clearThumbnailCache() {
+        if (this._thumbnailLoader && this._thumbnailLoaderChangedId) {
+            this._thumbnailLoader.disconnect(
+                this._thumbnailLoaderChangedId
+            );
+        }
+        this._thumbnailLoaderChangedId = null;
+        if (this._thumbnailLoader) {
+            this._thumbnailLoader.content = null;
+            this._thumbnailLoader.destroy();
+            this._thumbnailLoader = null;
+        }
+        this._thumbnailContent = null;
+        this._thumbnailPath = null;
+    }
+
+    _addThumbnail() {
+        if (!this._thumbnailContent)
+            return;
+
+        try {
+            const thumbnail = new Clutter.Actor({
+                content: this._thumbnailContent,
+                width: THUMBNAIL_WIDTH,
+                height: THUMBNAIL_HEIGHT,
+                content_gravity: Clutter.ContentGravity.RESIZE_ASPECT,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+
+            const frame = new St.Bin({
+                style_class: 'spotlight-information-thumbnail-frame',
+                x_expand: true,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+                clip_to_allocation: true,
+                child: thumbnail,
+            });
+            const item = new PopupMenu.PopupBaseMenuItem({
+                reactive: false,
+                can_focus: false,
+            });
+            item.add_style_class_name(
+                'spotlight-information-thumbnail-item'
+            );
+            item.add_child(frame);
+            this._indicator.menu.addMenuItem(item);
+        } catch (error) {
+            console.error(
+                `Spotlight Information: could not load thumbnail: ${error.message}`
             );
         }
     }

@@ -15,19 +15,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - A per-user GNOME extension installer.
 - A self-contained GJS downloader using libsoup, metadata-based deduplication,
   preferred-resolution fallback, and direct GNOME wallpaper integration.
-- Extension-managed refresh on enable and every hour, with no Python or
-  systemd dependency.
+- Extension-managed refresh on enable and at configurable intervals from one
+  minute through one day, with no Python or systemd dependency.
 - A native preferences window for the archive directory, refresh interval,
   result count, country, locale, and wallpaper behavior.
+- An asynchronously loaded, cached thumbnail of the active wallpaper in the
+  panel popup.
 
 ### Changed
 
 - Aligned the reported CLI version with the latest `v1.2.0` release.
 - Made the GNOME extension the primary installation path while retaining the
   Python CLI and systemd units as optional compatibility tools.
-- Defaulted the extension to downloading without changing the wallpaper;
-  random archive selection and newly downloaded wallpaper application are
-  available as mutually exclusive preferences.
+- Defaulted the extension to applying a wallpaper only when a new image is
+  downloaded; download-only and random archive selection remain available as
+  mutually exclusive preferences.
 
 ### Fixed
 

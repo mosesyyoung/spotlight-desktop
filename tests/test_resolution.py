@@ -251,6 +251,11 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("SpotlightRefresher", source)
         self.assertIn("timeout_add_seconds", source)
         self.assertIn("this._cancellable?.cancel()", source)
+        self.assertIn("St.TextureCache.get_default().load_file_async", source)
+        self.assertIn("imagePath !== this._thumbnailPath", source)
+        self.assertIn("this._thumbnailContent = content", source)
+        self.assertIn("content: this._thumbnailContent", source)
+        self.assertIn("this._clearThumbnailCache()", source)
 
         downloader = (extension_directory / "spotlight.js").read_text(
             encoding="utf-8"
@@ -258,6 +263,7 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("Soup.Session", downloader)
         self.assertIn("Gio.Settings", downloader)
         self.assertIn("picture-uri-dark", downloader)
+        self.assertIn("DEFAULT_WALLPAPER_BEHAVIOR = 'new-download'", downloader)
         self.assertIn("replacementsNeeded", downloader)
         self.assertIn("this._count - downloaded.length", downloader)
         self.assertIn(".slice(0, this._count)", downloader)
@@ -265,10 +271,12 @@ class ResolutionSelectionTests(unittest.TestCase):
         prefs = (extension_directory / "prefs.js").read_text(encoding="utf-8")
         self.assertIn("ExtensionPreferences", prefs)
         self.assertIn("Archive folder", prefs)
+        self.assertIn("Every 1 minute", prefs)
+        self.assertIn("Every 5 minutes", prefs)
         self.assertIn("Every hour", prefs)
         self.assertIn("Download only", prefs)
 
-    def test_gnome_extension_settings_defaults_match_cli(self):
+    def test_gnome_extension_settings_defaults(self):
         project_root = Path(__file__).resolve().parents[1]
         schema_file = (
             project_root
@@ -287,7 +295,7 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertEqual(keys["locale"].findtext("default"), "'zh-CN'")
         self.assertEqual(
             keys["wallpaper-behavior"].findtext("default"),
-            "'download-only'",
+            "'new-download'",
         )
 
     def test_gnome_extension_installer_uses_user_data_directory(self):

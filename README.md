@@ -31,12 +31,13 @@ GNOME Spotlight information
 - 3840×2160 / 4K preference and lower-resolution fallback
 - Per-image JSON metadata and metadata-based download history
 - GNOME light and dark wallpaper integration
-- Refresh when the extension is enabled and every hour while it is running
+- Refresh when the extension is enabled and at a configurable interval
 - XDG-compatible `current.json` state for the active wallpaper
 - GNOME Shell Panel Indicator with a metadata popup
 - Automatic popup refresh through `Gio.FileMonitor`
 - A native preferences window for download, schedule, locale, and wallpaper
   behavior settings
+- A cached thumbnail of the active wallpaper in the panel popup
 
 The primary desktop target is Ubuntu 26.04 with GNOME Shell 50 on Wayland. The
 GNOME extension uses only platform libraries provided by GNOME. The optional
@@ -62,8 +63,9 @@ gnome-extensions enable spotlight-desktop@mosesyyoung
 
 Enabling the extension immediately checks for new Spotlight images. While the
 extension remains enabled, it checks again every hour. Downloads are stored in
-the XDG Pictures directory under `SpotlightArchive`. By default the extension
-downloads new images without changing the wallpaper.
+the XDG Pictures directory under `SpotlightArchive`. By default, a newly
+downloaded image is applied to both the light and dark GNOME backgrounds; the
+wallpaper remains unchanged when no new image is available.
 
 If GNOME Shell has not discovered a newly installed extension, log out and log
 back in before running the enable command. The installer writes only to the
@@ -241,9 +243,10 @@ journalctl --user -u spotlight-desktop.service
 
 The extension targets Ubuntu 26.04, GNOME Shell 50, and Wayland. It adds a
 lightweight information icon to the right side of the top panel, performs
-downloads asynchronously with libsoup, manages its own hourly refresh, and
-uses `Gio.Settings` to apply the wallpaper without spawning external commands.
-The popup shows download status and the metadata present in `current.json`.
+downloads asynchronously with libsoup, manages its own configurable refresh
+schedule, and uses `Gio.Settings` to apply the wallpaper without spawning
+external commands. The popup shows download status, available metadata, a
+16:9 thumbnail of the active wallpaper, and its filename.
 
 Open the preferences window from Extension Manager or from the command line:
 
@@ -256,17 +259,17 @@ Available settings:
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
 | Archive folder | `~/Pictures/SpotlightArchive` | Uses the localized XDG Pictures directory when unchanged |
-| Check for new wallpapers | Every hour | Also checks once whenever the extension is enabled |
+| Check for new wallpapers | Every hour | From one minute through one day, or only when enabled; enabling always triggers one check |
 | Results per check | `10` | Accepts values from 1 through 50 |
 | Country code | `CN` | Two-letter Spotlight country code |
 | Language and locale | `zh-CN` | Locale sent to the Spotlight APIs |
-| After checking for wallpapers | Download only | Download only, choose a random archive image, or apply a newly downloaded image |
+| After checking for wallpapers | Apply a newly downloaded wallpaper | Keep the current wallpaper when no new image was downloaded |
 
-The wallpaper behavior choices match the optional Python CLI: **Download only**
-performs no wallpaper action, **Set a random wallpaper from the archive** matches
-`--set-wallpaper` without an image argument, and **Apply a newly downloaded
-wallpaper** matches `--refresh`. Wallpaper changes update both `picture-uri` and
-`picture-uri-dark`.
+The wallpaper behavior choices match the optional Python CLI: **Apply a newly
+downloaded wallpaper** matches `--refresh`, **Set a random wallpaper from the
+archive** matches `--set-wallpaper` without an image argument, and **Download
+only** performs no wallpaper action. Wallpaper changes update both
+`picture-uri` and `picture-uri-dark`.
 
 Inspect its state:
 
@@ -279,30 +282,35 @@ journalctl --user -f -o cat /usr/bin/gnome-shell
 The extension monitors the XDG state directory with `Gio.FileMonitor`. Updating
 `current.json` refreshes the popup immediately, including while it is open; no
 polling, Shell restart, or manual metadata refresh is required. Missing state
-shows an unavailable message. Invalid JSON is logged without crashing GNOME
-Shell, and the last successfully loaded information remains visible.
+shows an unavailable message. The current image is loaded asynchronously into
+a cached 16:9 thumbnail between its descriptive text and filename. A missing
+image skips the thumbnail, and an image-loading failure does not affect the
+remaining information. Invalid JSON is logged without crashing GNOME Shell,
+and the last successfully loaded information remains visible.
 
 ### Extension test checklist
 
 1. Install and enable the extension; confirm the panel indicator appears and
    reports that it is checking for wallpapers.
-2. Confirm an image and adjacent metadata JSON appear in
-   `~/Pictures/SpotlightArchive`.
-3. Open the preferences window and select **Apply a newly downloaded
-   wallpaper**.
-4. Trigger another check by disabling and enabling the extension. Confirm both
-   light and dark GNOME backgrounds change and inspect
+2. Confirm an image and adjacent metadata JSON appear in the configured archive
+   directory (the XDG Pictures directory under `SpotlightArchive` by default).
+3. Confirm both light and dark GNOME backgrounds change and inspect
    `~/.local/state/spotlight-desktop/current.json`.
-5. Open the popup and compare its text with `current.json`.
+4. Open the popup, compare its text with `current.json`, and confirm the
+   thumbnail appears between the descriptive text and filename.
+5. Set the interval to **Every 1 minute**, confirm a subsequent check, then
+   restore **Every hour**.
 6. Replace `current.json` with another valid state file and confirm the open
-   popup refreshes.
-7. Disable the extension and confirm the indicator disappears:
+   popup and thumbnail refresh.
+7. Temporarily rename the current image and confirm the popup remains usable
+   without a thumbnail.
+8. Disable the extension and confirm the indicator disappears:
 
    ```bash
    gnome-extensions disable spotlight-desktop@mosesyyoung
    ```
 
-8. Enable it again and confirm only one indicator and one refresh operation
+9. Enable it again and confirm only one indicator and one refresh operation
    appear.
 
 For isolated Wayland testing on GNOME 49 or newer, GNOME documents a nested
@@ -375,8 +383,9 @@ spotlight-desktop/
 - [x] Download Spotlight images directly with GJS and libsoup
 - [x] Preserve metadata-based download history
 - [x] Apply light and dark wallpapers with `Gio.Settings`
-- [x] Refresh on enable and hourly without systemd
+- [x] Refresh on enable and at configurable intervals without systemd
 - [x] Add extension preferences for locale and refresh behavior
+- [x] Show the current wallpaper thumbnail in the panel popup
 
 ## Development and testing
 

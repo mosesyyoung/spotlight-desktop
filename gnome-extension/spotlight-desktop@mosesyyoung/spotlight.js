@@ -13,7 +13,7 @@ const MAX_STALE_BATCHES = 5;
 const DEFAULT_COUNT = 10;
 const DEFAULT_COUNTRY = 'CN';
 const DEFAULT_LOCALE = 'zh-CN';
-const DEFAULT_WALLPAPER_BEHAVIOR = 'download-only';
+const DEFAULT_WALLPAPER_BEHAVIOR = 'new-download';
 const WALLPAPER_BEHAVIORS = new Set([
     'download-only',
     'random-archive',

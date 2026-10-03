@@ -11,6 +11,8 @@ import {
 const DEFAULT_ARCHIVE_NAME = 'SpotlightArchive';
 const INTERVALS = [
     {value: 0, label: 'Only when enabled'},
+    {value: 60, label: 'Every 1 minute'},
+    {value: 5 * 60, label: 'Every 5 minutes'},
     {value: 15 * 60, label: 'Every 15 minutes'},
     {value: 30 * 60, label: 'Every 30 minutes'},
     {value: 60 * 60, label: 'Every hour'},
