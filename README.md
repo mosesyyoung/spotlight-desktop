@@ -3,9 +3,11 @@
 A lightweight Microsoft Windows Spotlight experience for Ubuntu/Linux
 desktops.
 
-Spotlight Desktop downloads high-resolution Microsoft Spotlight images,
-deduplicates them using per-image metadata, applies new wallpapers through
-GNOME, and exposes information about the current image in the GNOME panel.
+Spotlight Desktop is a self-contained GNOME Shell extension that downloads
+high-resolution Microsoft Spotlight images, deduplicates them using per-image
+metadata, applies new wallpapers, and exposes information about the current
+image in the GNOME panel. It does not require a Python environment or systemd
+service for normal desktop use.
 
 ```text
 Microsoft Spotlight
@@ -16,7 +18,7 @@ metadata-based deduplication
         ↓
 GNOME wallpaper
         ↓
-hourly automatic refresh
+extension-managed automatic refresh
         ↓
 GNOME Spotlight information
 ```
@@ -29,36 +31,48 @@ GNOME Spotlight information
 - 3840×2160 / 4K preference and lower-resolution fallback
 - Per-image JSON metadata and metadata-based download history
 - GNOME light and dark wallpaper integration
-- Hourly refresh through a systemd user timer
+- Refresh when the extension is enabled and every hour while it is running
 - XDG-compatible `current.json` state for the active wallpaper
 - GNOME Shell Panel Indicator with a metadata popup
 - Automatic popup refresh through `Gio.FileMonitor`
 
-The primary desktop target is Ubuntu 26.04 with GNOME Shell 50 on Wayland.
-Downloading also works on other Linux desktops with Python, while wallpaper and
-panel integration require GNOME. No Conky service is used.
+The primary desktop target is Ubuntu 26.04 with GNOME Shell 50 on Wayland. The
+GNOME extension uses only platform libraries provided by GNOME. The optional
+Python CLI continues to support downloading on other Linux desktops. No Conky
+or systemd service is required by the extension.
 
-## Requirements
+## Extension requirements
 
-- Python 3.10 or newer
-- `python3-venv` and `pip`
-- An active GNOME session for wallpaper integration
-- `gsettings` (provided by `libglib2.0-bin` on Ubuntu)
 - GNOME Shell 50 for the included extension
+- An active GNOME session and network connection
 
-Install the base Ubuntu packages:
+Python 3.10, `pip`, Pillow, and Requests are required only for the optional
+command-line client.
 
-```bash
-sudo apt update
-sudo apt install python3 python3-venv libglib2.0-bin
-```
-
-## Installation
+## Extension installation
 
 ```bash
 git clone https://github.com/mosesyyoung/spotlight-desktop.git
 cd spotlight-desktop
+./scripts/install-gnome-extension.sh
+gnome-extensions enable spotlight-desktop@mosesyyoung
+```
 
+Enabling the extension immediately checks for new Spotlight images. While the
+extension remains enabled, it checks again every hour. Downloads are stored in
+`~/Pictures/SpotlightArchive`; new images are applied to both the light and dark
+GNOME background settings.
+
+If GNOME Shell has not discovered a newly installed extension, log out and log
+back in before running the enable command. The installer writes only to the
+current user's data directory and does not require root.
+
+## Optional command-line client
+
+The original Python implementation remains available for scripting and
+non-GNOME environments. Install its dependencies with:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -186,12 +200,11 @@ The file is written as UTF-8 through a temporary file followed by an atomic
 rename. A failed GNOME wallpaper update leaves the previous `current.json`
 untouched.
 
-## Hourly systemd refresh
+## Legacy systemd refresh
 
-The included systemd user timer checks for new Spotlight images every hour. If
-new files are downloaded, one of those files is applied and `current.json` is
-updated. If all returned images already exist, neither the wallpaper nor
-`current.json` changes.
+The systemd user timer is retained for CLI users and headless scheduling. It is
+not needed when automatic refresh is provided by the GNOME extension. Do not
+enable both schedulers unless duplicate API checks are acceptable.
 
 Install the backend and timer into the paths used by the supplied service:
 
@@ -222,24 +235,13 @@ systemctl --user start spotlight-desktop.service
 journalctl --user -u spotlight-desktop.service
 ```
 
-## GNOME Spotlight Information extension
+## GNOME Spotlight extension
 
 The extension targets Ubuntu 26.04, GNOME Shell 50, and Wayland. It adds a
-lightweight information icon to the right side of the top panel. The popup
-shows only fields present in `current.json`, wraps long descriptions, supports
-UTF-8 text, and displays a fallback message before Spotlight Desktop has set a
-wallpaper.
-
-Install the extension for the current user:
-
-```bash
-./scripts/install-gnome-extension.sh
-gnome-extensions enable spotlight-desktop@mosesyyoung
-```
-
-If GNOME Shell has not discovered a newly installed extension, log out and log
-back in before running the enable command. The installer never writes to
-`/usr/share` and does not require root.
+lightweight information icon to the right side of the top panel, performs
+downloads asynchronously with libsoup, manages its own hourly refresh, and
+uses `Gio.Settings` to apply the wallpaper without spawning external commands.
+The popup shows download status and the metadata present in `current.json`.
 
 Inspect its state:
 
@@ -257,19 +259,23 @@ Shell, and the last successfully loaded information remains visible.
 
 ### Extension test checklist
 
-1. Run `python spotlight_downloader.py --set-wallpaper IMAGE` for an archived
-   Spotlight image and inspect `~/.local/state/spotlight-desktop/current.json`.
-2. Install and enable the extension; confirm the panel indicator appears.
-3. Open the popup and compare its text with `current.json`.
-4. Replace `current.json` with another valid state file and confirm the open
+1. Install and enable the extension; confirm the panel indicator appears and
+   reports that it is checking for wallpapers.
+2. Confirm a wallpaper and adjacent metadata JSON appear in
+   `~/Pictures/SpotlightArchive`.
+3. Confirm both light and dark GNOME backgrounds change and inspect
+   `~/.local/state/spotlight-desktop/current.json`.
+4. Open the popup and compare its text with `current.json`.
+5. Replace `current.json` with another valid state file and confirm the open
    popup refreshes.
-5. Disable the extension and confirm the indicator disappears:
+6. Disable the extension and confirm the indicator disappears:
 
    ```bash
    gnome-extensions disable spotlight-desktop@mosesyyoung
    ```
 
-6. Enable it again and confirm only one indicator appears.
+7. Enable it again and confirm only one indicator and one refresh operation
+   appear.
 
 For isolated Wayland testing on GNOME 49 or newer, GNOME documents a nested
 development session using `mutter-devkit` (`mutter-dev-bin` on Ubuntu):
@@ -291,6 +297,7 @@ spotlight-desktop/
 │   └── spotlight-desktop@mosesyyoung/
 │       ├── metadata.json
 │       ├── extension.js
+│       ├── spotlight.js
 │       └── stylesheet.css
 ├── scripts/
 │   └── install-gnome-extension.sh
@@ -331,6 +338,15 @@ spotlight-desktop/
 - [x] Spotlight metadata popup
 - [x] Automatic metadata refresh with `Gio.FileMonitor`
 
+### v1.4 Self-contained GNOME Extension
+
+- [x] Document the extension-first architecture
+- [x] Download Spotlight images directly with GJS and libsoup
+- [x] Preserve metadata-based download history
+- [x] Apply light and dark wallpapers with `Gio.Settings`
+- [x] Refresh on enable and hourly without systemd
+- [ ] Add extension preferences for locale and refresh behavior
+
 ## Development and testing
 
 Run the automated checks:
@@ -339,10 +355,11 @@ Run the automated checks:
 source .venv/bin/activate
 python -m unittest discover -s tests -v
 python -m py_compile spotlight_downloader.py
-node --check \
-    gnome-extension/spotlight-desktop@mosesyyoung/extension.js
+node --check gnome-extension/spotlight-desktop@mosesyyoung/extension.js
+node --check gnome-extension/spotlight-desktop@mosesyyoung/spotlight.js
 sh -n scripts/install-gnome-extension.sh
 gnome-extensions pack --force \
+    --extra-source=spotlight.js \
     gnome-extension/spotlight-desktop@mosesyyoung
 systemd-analyze --user verify \
     systemd/spotlight-desktop.service \

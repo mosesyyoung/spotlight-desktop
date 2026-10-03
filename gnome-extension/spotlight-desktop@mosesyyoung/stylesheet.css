@@ -1,4 +1,5 @@
 .spotlight-information-heading,
+.spotlight-information-status,
 .spotlight-information-title,
 .spotlight-information-location,
 .spotlight-information-body,
@@ -9,6 +10,11 @@
 
 .spotlight-information-heading {
     font-weight: bold;
+}
+
+.spotlight-information-status {
+    font-size: 0.9em;
+    opacity: 0.8;
 }
 
 .spotlight-information-title {

@@ -224,7 +224,7 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("Persistent=true", timer)
         self.assertIn("spotlight_downloader.py --refresh", service)
 
-    def test_gnome_extension_targets_shell_50_and_monitors_current_state(self):
+    def test_gnome_extension_refreshes_and_monitors_current_state(self):
         project_root = Path(__file__).resolve().parents[1]
         extension_directory = (
             project_root
@@ -243,7 +243,19 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("GLib.get_user_state_dir()", source)
         self.assertIn("monitor_directory", source)
         self.assertIn("this._monitor?.cancel()", source)
-        self.assertNotIn("timeout_add", source)
+        self.assertIn("SpotlightRefresher", source)
+        self.assertIn("timeout_add_seconds", source)
+        self.assertIn("this._cancellable?.cancel()", source)
+
+        downloader = (extension_directory / "spotlight.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Soup.Session", downloader)
+        self.assertIn("Gio.Settings", downloader)
+        self.assertIn("picture-uri-dark", downloader)
+        self.assertIn("replacementsNeeded", downloader)
+        self.assertIn("this._count - downloaded.length", downloader)
+        self.assertIn(".slice(0, this._count)", downloader)
 
     def test_gnome_extension_installer_uses_user_data_directory(self):
         project_root = Path(__file__).resolve().parents[1]
@@ -267,6 +279,7 @@ class ResolutionSelectionTests(unittest.TestCase):
 
             self.assertTrue((installed / "metadata.json").is_file())
             self.assertTrue((installed / "extension.js").is_file())
+            self.assertTrue((installed / "spotlight.js").is_file())
             self.assertTrue((installed / "stylesheet.css").is_file())
             self.assertIn("gnome-extensions enable", result.stdout)
 

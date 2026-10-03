@@ -1,8 +1,8 @@
 {
   "name": "Spotlight Information",
-  "description": "Show information about the current Microsoft Spotlight wallpaper in the GNOME panel.",
+  "description": "Download, apply, and show information about Microsoft Spotlight wallpapers.",
   "uuid": "spotlight-desktop@mosesyyoung",
   "shell-version": ["50"],
   "url": "https://github.com/mosesyyoung/spotlight-desktop",
-  "version": 1
+  "version": 2
 }

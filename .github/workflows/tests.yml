@@ -35,7 +35,9 @@ jobs:
         run: python -m py_compile spotlight_downloader.py
 
       - name: Check GNOME extension JavaScript
-        run: node --check gnome-extension/spotlight-desktop@mosesyyoung/extension.js
+        run: |
+          node --check gnome-extension/spotlight-desktop@mosesyyoung/extension.js
+          node --check gnome-extension/spotlight-desktop@mosesyyoung/spotlight.js
 
       - name: Check installer shell syntax
         run: sh -n scripts/install-gnome-extension.sh

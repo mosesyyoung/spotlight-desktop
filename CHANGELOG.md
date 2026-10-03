@@ -13,10 +13,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   wallpaper and its available Spotlight metadata.
 - A GNOME Shell 50 panel indicator with a live Spotlight information popup.
 - A per-user GNOME extension installer.
+- A self-contained GJS downloader using libsoup, metadata-based deduplication,
+  preferred-resolution fallback, and direct GNOME wallpaper integration.
+- Extension-managed refresh on enable and every hour, with no Python or
+  systemd dependency.
 
 ### Changed
 
 - Aligned the reported CLI version with the latest `v1.2.0` release.
+- Made the GNOME extension the primary installation path while retaining the
+  Python CLI and systemd units as optional compatibility tools.
+
+### Fixed
+
+- Limit lower-resolution fallback downloads to the number of failed preferred
+  downloads and the configured total count.
 
 ## [1.2.0] - 2026-08-23
 

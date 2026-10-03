@@ -8,15 +8,25 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
+import {SpotlightRefresher} from './spotlight.js';
+
 
 const STATE_DIRECTORY = 'spotlight-desktop';
 const STATE_FILENAME = 'current.json';
+const REFRESH_INTERVAL_SECONDS = 60 * 60;
 
 
 export default class SpotlightInformationExtension extends Extension {
     enable() {
+        this._enabled = true;
+        this._generation = (this._generation ?? 0) + 1;
         this._currentState = null;
         this._lastReadError = null;
+        this._refreshStatus = null;
+        this._refreshPromise = null;
+        this._refreshTimerId = null;
+        this._cancellable = new Gio.Cancellable();
+        this._refresher = new SpotlightRefresher();
         this._stateDirectory = null;
         this._stateFile = null;
         this._monitor = null;
@@ -35,9 +45,31 @@ export default class SpotlightInformationExtension extends Extension {
 
         this._setupStateMonitor();
         this._loadState();
+        this._startRefresh();
+        this._refreshTimerId = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT,
+            REFRESH_INTERVAL_SECONDS,
+            () => {
+                this._startRefresh();
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
     }
 
     disable() {
+        this._enabled = false;
+        this._generation++;
+        if (this._refreshTimerId) {
+            GLib.Source.remove(this._refreshTimerId);
+            this._refreshTimerId = null;
+        }
+        this._cancellable?.cancel();
+        this._refresher?.abort();
+        this._cancellable = null;
+        this._refresher = null;
+        this._refreshPromise = null;
+        this._refreshStatus = null;
+
         if (this._monitor && this._monitorChangedId) {
             this._monitor.disconnect(this._monitorChangedId);
             this._monitorChangedId = null;
@@ -51,6 +83,52 @@ export default class SpotlightInformationExtension extends Extension {
 
         this._indicator?.destroy();
         this._indicator = null;
+    }
+
+    _startRefresh() {
+        if (!this._enabled || this._refreshPromise)
+            return;
+
+        const generation = this._generation;
+        this._refreshStatus = 'Checking for new wallpapers…';
+        this._renderMenu();
+
+        const operation = this._runRefresh(generation);
+        this._refreshPromise = operation;
+        const clearOperation = () => {
+            if (this._refreshPromise === operation)
+                this._refreshPromise = null;
+        };
+        operation.then(clearOperation, error => {
+            clearOperation();
+            console.error(
+                `Spotlight Desktop: unexpected refresh error: ${error.message}`
+            );
+        });
+    }
+
+    async _runRefresh(generation) {
+        try {
+            const result = await this._refresher.refresh(this._cancellable);
+            if (!this._enabled || generation !== this._generation)
+                return;
+
+            if (result.downloaded > 0) {
+                const noun = result.downloaded === 1 ? 'wallpaper' : 'wallpapers';
+                this._refreshStatus =
+                    `Downloaded ${result.downloaded} new ${noun}.`;
+            } else if (result.restored) {
+                this._refreshStatus = 'Applied a wallpaper from the archive.';
+            } else {
+                this._refreshStatus = 'No new wallpapers found.';
+            }
+        } catch (error) {
+            if (!this._enabled || generation !== this._generation)
+                return;
+            this._refreshStatus = `Refresh failed: ${error.message}`;
+            console.error(`Spotlight Desktop: refresh failed: ${error.message}`);
+        }
+        this._renderMenu();
     }
 
     _setupStateMonitor() {
@@ -122,6 +200,8 @@ export default class SpotlightInformationExtension extends Extension {
 
         this._indicator.menu.removeAll();
         this._addText('Spotlight', 'spotlight-information-heading');
+        if (this._hasText(this._refreshStatus))
+            this._addText(this._refreshStatus, 'spotlight-information-status');
         this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         if (!this._currentState) {

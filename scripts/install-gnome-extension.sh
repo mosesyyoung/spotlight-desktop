@@ -10,7 +10,8 @@ data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 destination_directory="$data_home/gnome-shell/extensions/$extension_uuid"
 
 if [ ! -f "$source_directory/metadata.json" ] || \
-   [ ! -f "$source_directory/extension.js" ]; then
+   [ ! -f "$source_directory/extension.js" ] || \
+   [ ! -f "$source_directory/spotlight.js" ]; then
     echo "Error: GNOME extension sources were not found in $source_directory" >&2
     exit 1
 fi
@@ -18,6 +19,7 @@ fi
 install -d "$destination_directory"
 install -m 0644 "$source_directory/metadata.json" "$destination_directory/"
 install -m 0644 "$source_directory/extension.js" "$destination_directory/"
+install -m 0644 "$source_directory/spotlight.js" "$destination_directory/"
 install -m 0644 "$source_directory/stylesheet.css" "$destination_directory/"
 
 echo "Installed $extension_uuid to:"
