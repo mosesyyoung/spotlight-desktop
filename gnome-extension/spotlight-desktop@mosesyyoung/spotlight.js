@@ -306,6 +306,59 @@ export class SpotlightRefresher {
         this._session.abort();
     }
 
+    async applyRandomArchiveWallpaper(cancellable, excludedPath = null) {
+        this._ensureDirectories();
+        await this._loadHistory(cancellable);
+        return this._applyRandomArchiveWallpaper(cancellable, excludedPath);
+    }
+
+    async _applyRandomArchiveWallpaper(cancellable, excludedPath = null) {
+        let archived = [...this._archiveImages.values()];
+        if (archived.length === 0)
+            throw new Error('the wallpaper archive contains no images');
+
+        if (validText(excludedPath) && archived.length > 1) {
+            const alternatives = archived.filter(
+                item => item.file.get_path() !== excludedPath
+            );
+            if (alternatives.length > 0)
+                archived = alternatives;
+        }
+
+        const selected = archived[Math.floor(Math.random() * archived.length)];
+        await this._applyWallpaper(
+            selected.file,
+            selected.metadata,
+            cancellable
+        );
+        return selected.file;
+    }
+
+    async applyLocalWallpaper(imageFile, cancellable) {
+        this._ensureStateDirectory();
+        const path = imageFile?.get_path?.();
+        if (!validText(path))
+            throw new Error('only local wallpaper files are supported');
+        if (!/\.(?:jpe?g|png|webp)$/i.test(imageFile.get_basename()))
+            throw new Error('select a JPEG, PNG, or WebP image');
+
+        let contents;
+        try {
+            [contents] = await imageFile.load_contents_async(cancellable);
+            this._imageDimensions(contents);
+        } catch (error) {
+            if (isCancelled(error))
+                throw error;
+            throw new Error(`could not decode the selected image: ${error.message}`);
+        }
+
+        const metadata = await this._loadAdjacentMetadata(
+            imageFile,
+            cancellable
+        );
+        await this._applyWallpaper(imageFile, metadata, cancellable);
+    }
+
     async refresh(cancellable) {
         this._ensureDirectories();
         await this._loadHistory(cancellable);
@@ -380,9 +433,7 @@ export class SpotlightRefresher {
 
         if (this._wallpaperBehavior === 'random-archive' &&
             this._archiveImages.size > 0) {
-            const archived = [...this._archiveImages.values()];
-            const selected = archived[Math.floor(Math.random() * archived.length)];
-            await this._applyWallpaper(selected.file, selected.metadata, cancellable);
+            await this._applyRandomArchiveWallpaper(cancellable);
             return {applied: 'random-archive', downloaded: downloaded.length};
         }
 
@@ -392,14 +443,22 @@ export class SpotlightRefresher {
     }
 
     _ensureDirectories() {
+        try {
+            this._output.make_directory_with_parents(null);
+        } catch (error) {
+            if (!error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS))
+                throw error;
+        }
+        this._ensureStateDirectory();
+    }
+
+    _ensureStateDirectory() {
         const stateDirectory = this._stateFile.get_parent();
-        for (const directory of [this._output, stateDirectory]) {
-            try {
-                directory.make_directory_with_parents(null);
-            } catch (error) {
-                if (!error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS))
-                    throw error;
-            }
+        try {
+            stateDirectory.make_directory_with_parents(null);
+        } catch (error) {
+            if (!error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS))
+                throw error;
         }
         GLib.chmod(stateDirectory.get_path(), 0o700);
     }
@@ -637,6 +696,29 @@ export class SpotlightRefresher {
         }
     }
 
+    async _loadAdjacentMetadata(imageFile, cancellable) {
+        const metadataFile = imageFile.get_parent().get_child(
+            `${imageFile.get_basename()}.json`
+        );
+        if (!metadataFile.query_exists(cancellable))
+            return null;
+
+        try {
+            const [contents] = await metadataFile.load_contents_async(cancellable);
+            const metadata = JSON.parse(new TextDecoder().decode(contents));
+            if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))
+                throw new Error('metadata must contain a JSON object');
+            return metadata;
+        } catch (error) {
+            if (isCancelled(error))
+                throw error;
+            console.warn(
+                `Spotlight Desktop: ignored invalid ${metadataFile.get_basename()}: ${error.message}`
+            );
+            return null;
+        }
+    }
+
     async _applyWallpaper(imageFile, metadata, cancellable) {
         if (cancellable.is_cancelled())
             throw new Error('refresh was cancelled');
@@ -657,10 +739,10 @@ export class SpotlightRefresher {
             image: imageFile.get_path(),
             updated_at: nowIso8601(),
         };
-        const metadataFile = this._output.get_child(
+        const metadataFile = imageFile.get_parent().get_child(
             `${imageFile.get_basename()}.json`
         );
-        if (metadataFile.query_exists(cancellable))
+        if (metadata && metadataFile.query_exists(cancellable))
             state.metadata = metadataFile.get_path();
         for (const field of ['title', 'description', 'copyright', 'location', 'url']) {
             if (validText(metadata?.[field]))

@@ -37,6 +37,39 @@
     padding-bottom: 6px;
 }
 
+.spotlight-information-controls-item {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
+.spotlight-information-controls {
+    width: 360px;
+    spacing: 6px;
+}
+
+.spotlight-information-control-button {
+    padding: 7px 10px;
+    border-radius: 8px;
+    background-color: rgba(128, 128, 128, 0.16);
+}
+
+.spotlight-information-control-button:hover,
+.spotlight-information-control-button:focus {
+    background-color: rgba(128, 128, 128, 0.28);
+}
+
+.spotlight-information-control-button:active {
+    background-color: rgba(128, 128, 128, 0.38);
+}
+
+.spotlight-information-control-button:disabled {
+    opacity: 0.5;
+}
+
+.spotlight-information-control-content {
+    spacing: 5px;
+}
+
 .spotlight-information-thumbnail-frame {
     width: 360px;
     height: 203px;

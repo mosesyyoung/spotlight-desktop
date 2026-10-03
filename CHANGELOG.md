@@ -21,6 +21,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   result count, country, locale, and wallpaper behavior.
 - An asynchronously loaded, cached thumbnail of the active wallpaper in the
   panel popup.
+- A popup control bar for applying a random archive image, choosing a local
+  image through the desktop portal, and checking for new images immediately.
 
 ### Changed
 
@@ -30,6 +32,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Defaulted the extension to applying a wallpaper only when a new image is
   downloaded; download-only and random archive selection remain available as
   mutually exclusive preferences.
+- Made manual checks restart the configured interval and serialized all popup
+  actions so downloads and wallpaper updates cannot overlap.
 
 ### Fixed
 

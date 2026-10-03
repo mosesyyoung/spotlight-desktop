@@ -16,6 +16,10 @@ const STATE_DIRECTORY = 'spotlight-desktop';
 const STATE_FILENAME = 'current.json';
 const THUMBNAIL_WIDTH = 360;
 const THUMBNAIL_HEIGHT = 203;
+const PORTAL_BUS_NAME = 'org.freedesktop.portal.Desktop';
+const PORTAL_OBJECT_PATH = '/org/freedesktop/portal/desktop';
+const FILE_CHOOSER_INTERFACE = 'org.freedesktop.portal.FileChooser';
+const REQUEST_INTERFACE = 'org.freedesktop.portal.Request';
 
 
 export default class SpotlightInformationExtension extends Extension {
@@ -25,10 +29,11 @@ export default class SpotlightInformationExtension extends Extension {
         this._currentState = null;
         this._lastReadError = null;
         this._refreshStatus = null;
-        this._refreshPromise = null;
+        this._operationPromise = null;
         this._refreshTimerId = null;
         this._cancellable = null;
         this._refresher = null;
+        this._portalRequest = null;
         this._settings = this.getSettings();
         this._settingsChangedId = this._settings.connect(
             'changed::refresh-interval',
@@ -68,10 +73,11 @@ export default class SpotlightInformationExtension extends Extension {
             this._refreshTimerId = null;
         }
         this._cancellable?.cancel();
+        this._cancelPortalRequest();
         this._refresher?.abort();
         this._cancellable = null;
         this._refresher = null;
-        this._refreshPromise = null;
+        this._operationPromise = null;
         this._refreshStatus = null;
         if (this._settings && this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
@@ -116,45 +122,29 @@ export default class SpotlightInformationExtension extends Extension {
         );
     }
 
-    _startRefresh() {
-        if (!this._enabled || this._refreshPromise)
+    _startRefresh(resetSchedule = false) {
+        if (!this._enabled || this._operationPromise)
             return;
+
+        if (resetSchedule)
+            this._scheduleRefresh();
 
         const generation = this._generation;
         const cancellable = new Gio.Cancellable();
-        const refresher = new SpotlightRefresher({
-            output: this._settings.get_string('output-directory'),
-            count: this._settings.get_uint('result-count'),
-            country: this._settings.get_string('country-code'),
-            locale: this._settings.get_string('locale'),
-            wallpaperBehavior: this._settings.get_string(
-                'wallpaper-behavior'
-            ),
-        });
+        const refresher = this._newRefresher();
         this._cancellable = cancellable;
         this._refresher = refresher;
-        this._refreshStatus = 'Checking for new wallpapers…';
-        this._renderMenu();
-
         const operation = this._runRefresh(
             generation,
             refresher,
             cancellable
         );
-        this._refreshPromise = operation;
-        const clearOperation = () => {
-            if (this._refreshPromise === operation) {
-                this._refreshPromise = null;
-                this._cancellable = null;
-                this._refresher = null;
-            }
-        };
-        operation.then(clearOperation, error => {
-            clearOperation();
-            console.error(
-                `Spotlight Desktop: unexpected refresh error: ${error.message}`
-            );
-        });
+        this._beginOperation(
+            operation,
+            refresher,
+            cancellable,
+            'Checking for new wallpapers…'
+        );
     }
 
     async _runRefresh(generation, refresher, cancellable) {
@@ -184,6 +174,267 @@ export default class SpotlightInformationExtension extends Extension {
             console.error(`Spotlight Desktop: refresh failed: ${error.message}`);
         }
         this._renderMenu();
+    }
+
+    _beginOperation(operation, refresher, cancellable, status) {
+        this._operationPromise = operation;
+        this._cancellable = cancellable;
+        this._refresher = refresher;
+        this._refreshStatus = status;
+        this._renderMenu();
+
+        const clearOperation = () => {
+            if (this._operationPromise !== operation)
+                return;
+            this._operationPromise = null;
+            this._cancellable = null;
+            this._refresher = null;
+            if (this._enabled)
+                this._renderMenu();
+        };
+        operation.then(clearOperation, error => {
+            clearOperation();
+            console.error(
+                `Spotlight Desktop: unexpected operation error: ${error.message}`
+            );
+        });
+    }
+
+    _newRefresher() {
+        return new SpotlightRefresher({
+            output: this._settings.get_string('output-directory'),
+            count: this._settings.get_uint('result-count'),
+            country: this._settings.get_string('country-code'),
+            locale: this._settings.get_string('locale'),
+            wallpaperBehavior: this._settings.get_string(
+                'wallpaper-behavior'
+            ),
+        });
+    }
+
+    _startRandomWallpaper() {
+        if (!this._enabled || this._operationPromise)
+            return;
+
+        const generation = this._generation;
+        const cancellable = new Gio.Cancellable();
+        const refresher = this._newRefresher();
+        const operation = this._runWallpaperAction(
+            generation,
+            () => refresher.applyRandomArchiveWallpaper(
+                cancellable,
+                this._currentState?.image ?? null
+            ),
+            'Applied a random wallpaper from the archive.'
+        );
+        this._beginOperation(
+            operation,
+            refresher,
+            cancellable,
+            'Selecting a random archive wallpaper…'
+        );
+    }
+
+    _startChooseWallpaper() {
+        if (!this._enabled || this._operationPromise)
+            return;
+
+        const generation = this._generation;
+        const cancellable = new Gio.Cancellable();
+        const refresher = this._newRefresher();
+        const operation = this._runWallpaperAction(
+            generation,
+            async () => {
+                const imageFile = await this._chooseWallpaperFile(cancellable);
+                if (!imageFile)
+                    return false;
+                await refresher.applyLocalWallpaper(imageFile, cancellable);
+                return true;
+            },
+            'Applied the selected wallpaper.',
+            'Wallpaper selection cancelled.'
+        );
+        this._beginOperation(
+            operation,
+            refresher,
+            cancellable,
+            'Choose a wallpaper…'
+        );
+    }
+
+    async _runWallpaperAction(
+        generation,
+        action,
+        successStatus,
+        cancelledStatus = null
+    ) {
+        try {
+            const result = await action();
+            if (!this._enabled || generation !== this._generation)
+                return;
+            this._refreshStatus = result === false
+                ? cancelledStatus
+                : successStatus;
+        } catch (error) {
+            if (!this._enabled || generation !== this._generation)
+                return;
+            this._refreshStatus = `Wallpaper action failed: ${error.message}`;
+            console.error(
+                `Spotlight Desktop: wallpaper action failed: ${error.message}`
+            );
+        }
+        this._renderMenu();
+    }
+
+    _chooseWallpaperFile(cancellable) {
+        return new Promise((resolve, reject) => {
+            const connection = Gio.DBus.session;
+            const token = `spotlight_${GLib.uuid_string_random().replaceAll('-', '_')}`;
+            const sender = connection.get_unique_name()
+                .slice(1)
+                .replaceAll('.', '_');
+            const expectedPath =
+                `/org/freedesktop/portal/desktop/request/${sender}/${token}`;
+            const filters = [[
+                'Images',
+                [
+                    [1, 'image/jpeg'],
+                    [1, 'image/png'],
+                    [1, 'image/webp'],
+                ],
+            ]];
+            const request = {
+                path: expectedPath,
+                signalId: 0,
+                cancellableId: 0,
+                settled: false,
+            };
+
+            const cleanup = () => {
+                if (request.signalId) {
+                    connection.signal_unsubscribe(request.signalId);
+                    request.signalId = 0;
+                }
+                if (request.cancellableId) {
+                    cancellable.disconnect(request.cancellableId);
+                    request.cancellableId = 0;
+                }
+                if (this._portalRequest === request)
+                    this._portalRequest = null;
+            };
+            const settle = (callback, value) => {
+                if (request.settled)
+                    return;
+                request.settled = true;
+                cleanup();
+                callback(value);
+            };
+            request.cancel = () => {
+                this._closePortalRequest(request);
+                settle(reject, new Error('file selection was cancelled'));
+            };
+            const subscribe = path => connection.signal_subscribe(
+                PORTAL_BUS_NAME,
+                REQUEST_INTERFACE,
+                'Response',
+                path,
+                null,
+                Gio.DBusSignalFlags.NONE,
+                (_connection, _senderName, _objectPath, _interfaceName,
+                    _signalName, parameters) => {
+                    const [response, results] = parameters.deep_unpack();
+                    if (response !== 0) {
+                        settle(resolve, null);
+                        return;
+                    }
+                    const urisValue = results.uris;
+                    const uris = urisValue?.deep_unpack?.() ?? urisValue ?? [];
+                    if (!Array.isArray(uris) || uris.length === 0) {
+                        settle(
+                            reject,
+                            new Error('the file chooser returned no image')
+                        );
+                        return;
+                    }
+                    const file = Gio.File.new_for_uri(uris[0]);
+                    if (!file.get_path()) {
+                        settle(
+                            reject,
+                            new Error('only local wallpaper files are supported')
+                        );
+                        return;
+                    }
+                    settle(resolve, file);
+                }
+            );
+
+            request.signalId = subscribe(expectedPath);
+            request.cancellableId = cancellable.connect(() => request.cancel());
+            this._portalRequest = request;
+
+            const options = {
+                handle_token: new GLib.Variant('s', token),
+                modal: new GLib.Variant('b', true),
+                multiple: new GLib.Variant('b', false),
+                directory: new GLib.Variant('b', false),
+                filters: new GLib.Variant('a(sa(us))', filters),
+            };
+            connection.call(
+                PORTAL_BUS_NAME,
+                PORTAL_OBJECT_PATH,
+                FILE_CHOOSER_INTERFACE,
+                'OpenFile',
+                new GLib.Variant('(ssa{sv})', [
+                    '',
+                    'Choose a wallpaper',
+                    options,
+                ]),
+                new GLib.VariantType('(o)'),
+                Gio.DBusCallFlags.NONE,
+                -1,
+                cancellable,
+                (source, result) => {
+                    if (request.settled)
+                        return;
+                    try {
+                        const [returnedPath] = source.call_finish(result)
+                            .deep_unpack();
+                        request.path = returnedPath;
+                        if (returnedPath !== expectedPath) {
+                            const previousSignalId = request.signalId;
+                            request.signalId = subscribe(returnedPath);
+                            connection.signal_unsubscribe(previousSignalId);
+                        }
+                    } catch (error) {
+                        settle(reject, error);
+                    }
+                }
+            );
+        });
+    }
+
+    _closePortalRequest(request) {
+        if (!request?.path || request.settled)
+            return;
+        Gio.DBus.session.call(
+            PORTAL_BUS_NAME,
+            request.path,
+            REQUEST_INTERFACE,
+            'Close',
+            null,
+            null,
+            Gio.DBusCallFlags.NONE,
+            -1,
+            null,
+            null
+        );
+    }
+
+    _cancelPortalRequest() {
+        const request = this._portalRequest;
+        if (!request)
+            return;
+        request.cancel();
     }
 
     _wallpaperNoun(count) {
@@ -266,6 +517,7 @@ export default class SpotlightInformationExtension extends Extension {
         this._addText('Spotlight', 'spotlight-information-heading');
         if (this._hasText(this._refreshStatus))
             this._addText(this._refreshStatus, 'spotlight-information-status');
+        this._addControls();
         this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         if (!this._currentState) {
@@ -300,6 +552,60 @@ export default class SpotlightInformationExtension extends Extension {
                 'spotlight-information-file'
             );
         }
+    }
+
+    _addControls() {
+        const item = new PopupMenu.PopupBaseMenuItem({
+            reactive: false,
+            can_focus: false,
+        });
+        item.add_style_class_name('spotlight-information-controls-item');
+        const controls = new St.BoxLayout({
+            style_class: 'spotlight-information-controls',
+            x_expand: true,
+        });
+        controls.add_child(this._controlButton(
+            'media-playlist-shuffle-symbolic',
+            'Random',
+            () => this._startRandomWallpaper()
+        ));
+        controls.add_child(this._controlButton(
+            'document-open-symbolic',
+            'Choose…',
+            () => this._startChooseWallpaper()
+        ));
+        controls.add_child(this._controlButton(
+            'view-refresh-symbolic',
+            'Check now',
+            () => this._startRefresh(true)
+        ));
+        item.add_child(controls);
+        this._indicator.menu.addMenuItem(item);
+    }
+
+    _controlButton(iconName, label, callback) {
+        const content = new St.BoxLayout({
+            style_class: 'spotlight-information-control-content',
+        });
+        content.add_child(new St.Icon({
+            icon_name: iconName,
+            icon_size: 16,
+        }));
+        content.add_child(new St.Label({text: label}));
+
+        const button = new St.Button({
+            style_class: 'spotlight-information-control-button',
+            child: content,
+            reactive: !this._operationPromise,
+            can_focus: !this._operationPromise,
+            track_hover: true,
+            x_expand: true,
+        });
+        button.set_accessible_name(label);
+        if (this._operationPromise)
+            button.add_style_pseudo_class('disabled');
+        button.connect('clicked', callback);
+        return button;
     }
 
     _prepareThumbnail(imagePath) {

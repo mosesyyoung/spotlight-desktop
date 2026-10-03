@@ -241,6 +241,7 @@ class ResolutionSelectionTests(unittest.TestCase):
 
         self.assertEqual(metadata["uuid"], "spotlight-desktop@mosesyyoung")
         self.assertEqual(metadata["shell-version"], ["50"])
+        self.assertEqual(metadata["version"], 5)
         self.assertEqual(
             metadata["settings-schema"],
             "org.gnome.shell.extensions.spotlight-desktop",
@@ -256,6 +257,12 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("this._thumbnailContent = content", source)
         self.assertIn("content: this._thumbnailContent", source)
         self.assertIn("this._clearThumbnailCache()", source)
+        self.assertIn("media-playlist-shuffle-symbolic", source)
+        self.assertIn("document-open-symbolic", source)
+        self.assertIn("view-refresh-symbolic", source)
+        self.assertIn("org.freedesktop.portal.FileChooser", source)
+        self.assertIn("this._startRefresh(true)", source)
+        self.assertIn("this._operationPromise", source)
 
         downloader = (extension_directory / "spotlight.js").read_text(
             encoding="utf-8"
@@ -267,6 +274,9 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("replacementsNeeded", downloader)
         self.assertIn("this._count - downloaded.length", downloader)
         self.assertIn(".slice(0, this._count)", downloader)
+        self.assertIn("applyRandomArchiveWallpaper", downloader)
+        self.assertIn("applyLocalWallpaper", downloader)
+        self.assertIn("imageFile.get_parent().get_child", downloader)
 
         prefs = (extension_directory / "prefs.js").read_text(encoding="utf-8")
         self.assertIn("ExtensionPreferences", prefs)
