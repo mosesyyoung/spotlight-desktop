@@ -265,6 +265,12 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("this._operationPromise", source)
         self.assertIn("_addHeader()", source)
         self.assertIn("_attachTooltip(button, label)", source)
+        self.assertGreaterEqual(
+            source.count(
+                "Main.uiGroup.set_child_above_sibling(tooltip.label, null)"
+            ),
+            2,
+        )
         self.assertIn("new St.ScrollView", source)
         self.assertIn("current_folder: new GLib.Variant", source)
         self.assertIn("refresher.outputDirectory", source)

@@ -736,6 +736,7 @@ export default class SpotlightInformationExtension extends Extension {
         if (tooltip.timeoutId)
             return;
         if (tooltip.label.visible) {
+            Main.uiGroup.set_child_above_sibling(tooltip.label, null);
             tooltip.label.remove_all_transitions();
             tooltip.label.ease({
                 opacity: 255,
@@ -753,6 +754,10 @@ export default class SpotlightInformationExtension extends Extension {
                 if (!tooltip.button.hover || !tooltip.button.reactive)
                     return GLib.SOURCE_REMOVE;
 
+                // Opening or relayouting the popup can raise it above actors
+                // that were added to uiGroup earlier.  Raise the tooltip when
+                // it is actually shown so it always stays above the menu.
+                Main.uiGroup.set_child_above_sibling(tooltip.label, null);
                 tooltip.label.opacity = 0;
                 tooltip.label.show();
                 const extents = tooltip.button.get_transformed_extents();
