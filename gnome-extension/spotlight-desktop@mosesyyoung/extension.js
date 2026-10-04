@@ -20,6 +20,8 @@ const PORTAL_BUS_NAME = 'org.freedesktop.portal.Desktop';
 const PORTAL_OBJECT_PATH = '/org/freedesktop/portal/desktop';
 const FILE_CHOOSER_INTERFACE = 'org.freedesktop.portal.FileChooser';
 const REQUEST_INTERFACE = 'org.freedesktop.portal.Request';
+const TOOLTIP_DELAY_MS = 400;
+const MENU_FIXED_HEIGHT_RESERVE = 160;
 
 
 export default class SpotlightInformationExtension extends Extension {
@@ -47,6 +49,8 @@ export default class SpotlightInformationExtension extends Extension {
         this._thumbnailContent = null;
         this._thumbnailLoader = null;
         this._thumbnailLoaderChangedId = null;
+        this._tooltips = [];
+        this._menuOpenStateChangedId = null;
 
         this._indicator = new PanelMenu.Button(
             0.0,
@@ -58,6 +62,13 @@ export default class SpotlightInformationExtension extends Extension {
             style_class: 'system-status-icon',
         }));
         Main.panel.addToStatusArea(this.uuid, this._indicator);
+        this._menuOpenStateChangedId = this._indicator.menu.connect(
+            'open-state-changed',
+            (_menu, open) => {
+                if (!open)
+                    this._hideTooltips();
+            }
+        );
 
         this._setupStateMonitor();
         this._loadState();
@@ -96,6 +107,12 @@ export default class SpotlightInformationExtension extends Extension {
         this._currentState = null;
         this._lastReadError = null;
         this._clearThumbnailCache();
+        this._clearTooltips();
+
+        if (this._indicator?.menu && this._menuOpenStateChangedId) {
+            this._indicator.menu.disconnect(this._menuOpenStateChangedId);
+            this._menuOpenStateChangedId = null;
+        }
 
         this._indicator?.destroy();
         this._indicator = null;
@@ -245,7 +262,10 @@ export default class SpotlightInformationExtension extends Extension {
         const operation = this._runWallpaperAction(
             generation,
             async () => {
-                const imageFile = await this._chooseWallpaperFile(cancellable);
+                const imageFile = await this._chooseWallpaperFile(
+                    cancellable,
+                    refresher.outputDirectory
+                );
                 if (!imageFile)
                     return false;
                 await refresher.applyLocalWallpaper(imageFile, cancellable);
@@ -286,7 +306,7 @@ export default class SpotlightInformationExtension extends Extension {
         this._renderMenu();
     }
 
-    _chooseWallpaperFile(cancellable) {
+    _chooseWallpaperFile(cancellable, outputDirectory) {
         return new Promise((resolve, reject) => {
             const connection = Gio.DBus.session;
             const token = `spotlight_${GLib.uuid_string_random().replaceAll('-', '_')}`;
@@ -378,6 +398,12 @@ export default class SpotlightInformationExtension extends Extension {
                 multiple: new GLib.Variant('b', false),
                 directory: new GLib.Variant('b', false),
                 filters: new GLib.Variant('a(sa(us))', filters),
+                current_folder: new GLib.Variant(
+                    'ay',
+                    new TextEncoder().encode(
+                        `${this._prepareChooserDirectory(outputDirectory)}\0`
+                    )
+                ),
             };
             connection.call(
                 PORTAL_BUS_NAME,
@@ -411,6 +437,41 @@ export default class SpotlightInformationExtension extends Extension {
                 }
             );
         });
+    }
+
+    _prepareChooserDirectory(outputDirectory) {
+        const picturesPath = GLib.get_user_special_dir(
+            GLib.UserDirectory.DIRECTORY_PICTURES
+        );
+        const candidates = [
+            outputDirectory,
+            picturesPath ? Gio.File.new_for_path(picturesPath) : null,
+            Gio.File.new_for_path(GLib.get_home_dir()),
+        ];
+        const checked = new Set();
+
+        for (const candidate of candidates) {
+            const path = candidate?.get_path?.();
+            if (!path || checked.has(path))
+                continue;
+            checked.add(path);
+            try {
+                GLib.mkdir_with_parents(path, 0o755);
+                const info = candidate.query_info(
+                    'standard::type,access::can-read',
+                    Gio.FileQueryInfoFlags.NONE,
+                    null
+                );
+                if (info.get_file_type() === Gio.FileType.DIRECTORY &&
+                    info.get_attribute_boolean('access::can-read'))
+                    return path;
+            } catch (error) {
+                console.debug(
+                    `Spotlight Desktop: could not use chooser directory ${path}: ${error.message}`
+                );
+            }
+        }
+        return GLib.get_home_dir();
     }
 
     _closePortalRequest(request) {
@@ -513,99 +574,248 @@ export default class SpotlightInformationExtension extends Extension {
             : null;
         this._prepareThumbnail(imagePath);
 
+        this._clearTooltips();
         this._indicator.menu.removeAll();
-        this._addText('Spotlight', 'spotlight-information-heading');
+        this._addHeader();
         if (this._hasText(this._refreshStatus))
             this._addText(this._refreshStatus, 'spotlight-information-status');
-        this._addControls();
         this._indicator.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        const content = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
+        });
 
         if (!this._currentState) {
             this._addText(
                 'No Spotlight wallpaper information available.',
-                'spotlight-information-body'
+                'spotlight-information-body',
+                content
             );
+            this._addScrollableContent(content);
             return;
         }
 
         this._addOptionalText(
             this._currentState.title,
-            'spotlight-information-title'
+            'spotlight-information-title',
+            content
         );
         this._addOptionalText(
             this._currentState.location,
-            'spotlight-information-location'
+            'spotlight-information-location',
+            content
         );
         this._addOptionalText(
             this._currentState.description,
-            'spotlight-information-body'
+            'spotlight-information-body',
+            content
         );
         this._addOptionalText(
             this._currentState.copyright,
-            'spotlight-information-copyright'
+            'spotlight-information-copyright',
+            content
         );
 
         if (imagePath) {
-            this._addThumbnail();
+            this._addThumbnail(content);
             this._addText(
                 GLib.path_get_basename(imagePath),
-                'spotlight-information-file'
+                'spotlight-information-file',
+                content
             );
         }
+        this._addScrollableContent(content);
     }
 
-    _addControls() {
+    _addHeader() {
         const item = new PopupMenu.PopupBaseMenuItem({
             reactive: false,
             can_focus: false,
         });
-        item.add_style_class_name('spotlight-information-controls-item');
+        item.add_style_class_name('spotlight-information-header');
+        const heading = new St.Label({
+            text: 'Spotlight',
+            style_class: 'spotlight-information-heading',
+            y_align: Clutter.ActorAlign.CENTER,
+            x_expand: true,
+        });
         const controls = new St.BoxLayout({
             style_class: 'spotlight-information-controls',
-            x_expand: true,
         });
         controls.add_child(this._controlButton(
             'media-playlist-shuffle-symbolic',
-            'Random',
+            'Random wallpaper',
             () => this._startRandomWallpaper()
         ));
         controls.add_child(this._controlButton(
             'document-open-symbolic',
-            'Choose…',
+            'Choose a wallpaper',
             () => this._startChooseWallpaper()
         ));
         controls.add_child(this._controlButton(
             'view-refresh-symbolic',
-            'Check now',
+            'Check for new wallpapers',
             () => this._startRefresh(true)
         ));
+        item.add_child(heading);
         item.add_child(controls);
         this._indicator.menu.addMenuItem(item);
     }
 
     _controlButton(iconName, label, callback) {
-        const content = new St.BoxLayout({
-            style_class: 'spotlight-information-control-content',
-        });
-        content.add_child(new St.Icon({
+        const icon = new St.Icon({
             icon_name: iconName,
             icon_size: 16,
-        }));
-        content.add_child(new St.Label({text: label}));
+        });
 
         const button = new St.Button({
             style_class: 'spotlight-information-control-button',
-            child: content,
+            child: icon,
             reactive: !this._operationPromise,
             can_focus: !this._operationPromise,
             track_hover: true,
-            x_expand: true,
         });
         button.set_accessible_name(label);
-        if (this._operationPromise)
-            button.add_style_pseudo_class('disabled');
+        button.add_style_class_name(this._operationPromise
+            ? 'spotlight-information-control-button-disabled'
+            : 'spotlight-information-control-button-enabled');
         button.connect('clicked', callback);
+        this._attachTooltip(button, label);
         return button;
+    }
+
+    _addScrollableContent(content) {
+        const workArea = Main.layoutManager.getWorkAreaForMonitor(
+            Main.layoutManager.primaryIndex
+        );
+        const scaleFactor = St.ThemeContext.get_for_stage(global.stage)
+            .scale_factor;
+        const maximumHeight = Math.max(
+            120,
+            Math.round(workArea.height / scaleFactor - MENU_FIXED_HEIGHT_RESERVE)
+        );
+        const scrollView = new St.ScrollView({
+            style_class: 'spotlight-information-scroll-view',
+            overlay_scrollbars: true,
+            hscrollbar_policy: St.PolicyType.NEVER,
+            vscrollbar_policy: St.PolicyType.AUTOMATIC,
+            x_expand: true,
+            child: content,
+        });
+        scrollView.style = `max-height: ${maximumHeight}px;`;
+
+        const item = new PopupMenu.PopupBaseMenuItem({
+            reactive: false,
+            can_focus: false,
+        });
+        item.add_style_class_name('spotlight-information-scroll-item');
+        item.add_child(scrollView);
+        this._indicator.menu.addMenuItem(item);
+    }
+
+    _attachTooltip(button, text) {
+        const label = new St.Label({
+            text,
+            style_class: 'dash-label spotlight-information-tooltip',
+            visible: false,
+            opacity: 0,
+        });
+        Main.uiGroup.add_child(label);
+        const tooltip = {button, label, timeoutId: 0, hoverId: 0};
+        this._tooltips.push(tooltip);
+
+        tooltip.hoverId = button.connect('notify::hover', () => {
+            if (button.hover && button.reactive)
+                this._showTooltip(tooltip);
+            else
+                this._hideTooltip(tooltip);
+        });
+    }
+
+    _showTooltip(tooltip) {
+        if (tooltip.timeoutId)
+            return;
+        if (tooltip.label.visible) {
+            tooltip.label.remove_all_transitions();
+            tooltip.label.ease({
+                opacity: 255,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+            return;
+        }
+
+        tooltip.timeoutId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            TOOLTIP_DELAY_MS,
+            () => {
+                tooltip.timeoutId = 0;
+                if (!tooltip.button.hover || !tooltip.button.reactive)
+                    return GLib.SOURCE_REMOVE;
+
+                tooltip.label.opacity = 0;
+                tooltip.label.show();
+                const extents = tooltip.button.get_transformed_extents();
+                const xOffset = Math.floor(
+                    (extents.get_width() - tooltip.label.width) / 2
+                );
+                const x = Math.clamp(
+                    extents.get_x() + xOffset,
+                    0,
+                    global.stage.width - tooltip.label.width
+                );
+                const y = Math.clamp(
+                    extents.get_y() + extents.get_height() + 8,
+                    0,
+                    global.stage.height - tooltip.label.height
+                );
+                tooltip.label.set_position(x, y);
+                tooltip.label.ease({
+                    opacity: 255,
+                    duration: 150,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                });
+                return GLib.SOURCE_REMOVE;
+            }
+        );
+        GLib.Source.set_name_by_id(
+            tooltip.timeoutId,
+            '[spotlight-desktop] tooltip.open'
+        );
+    }
+
+    _hideTooltip(tooltip) {
+        if (tooltip.timeoutId) {
+            GLib.Source.remove(tooltip.timeoutId);
+            tooltip.timeoutId = 0;
+        }
+        if (!tooltip.label.visible)
+            return;
+
+        tooltip.label.remove_all_transitions();
+        tooltip.label.ease({
+            opacity: 0,
+            duration: 100,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => tooltip.label.hide(),
+        });
+    }
+
+    _hideTooltips() {
+        for (const tooltip of this._tooltips)
+            this._hideTooltip(tooltip);
+    }
+
+    _clearTooltips() {
+        for (const tooltip of this._tooltips) {
+            if (tooltip.timeoutId)
+                GLib.Source.remove(tooltip.timeoutId);
+            if (tooltip.hoverId)
+                tooltip.button.disconnect(tooltip.hoverId);
+            tooltip.label.remove_all_transitions();
+            tooltip.label.destroy();
+        }
+        this._tooltips = [];
     }
 
     _prepareThumbnail(imagePath) {
@@ -682,7 +892,7 @@ export default class SpotlightInformationExtension extends Extension {
         this._thumbnailPath = null;
     }
 
-    _addThumbnail() {
+    _addThumbnail(target) {
         if (!this._thumbnailContent)
             return;
 
@@ -712,7 +922,7 @@ export default class SpotlightInformationExtension extends Extension {
                 'spotlight-information-thumbnail-item'
             );
             item.add_child(frame);
-            this._indicator.menu.addMenuItem(item);
+            target.add_child(item);
         } catch (error) {
             console.error(
                 `Spotlight Information: could not load thumbnail: ${error.message}`
@@ -720,24 +930,32 @@ export default class SpotlightInformationExtension extends Extension {
         }
     }
 
-    _addOptionalText(value, styleClass) {
+    _addOptionalText(value, styleClass, target = null) {
         if (this._hasText(value))
-            this._addText(value.trim(), styleClass);
+            this._addText(value.trim(), styleClass, target);
     }
 
     _hasText(value) {
         return typeof value === 'string' && value.trim().length > 0;
     }
 
-    _addText(text, styleClass) {
+    _addText(text, styleClass, target = null) {
         const item = new PopupMenu.PopupMenuItem(text, {
             reactive: false,
             can_focus: false,
         });
+        if (target) {
+            item.add_style_class_name(
+                'spotlight-information-content-item'
+            );
+        }
         item.label.add_style_class_name(styleClass);
         item.label.clutter_text.set_line_wrap(true);
         item.label.clutter_text.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR);
         item.label.clutter_text.set_ellipsize(Pango.EllipsizeMode.NONE);
-        this._indicator.menu.addMenuItem(item);
+        if (target)
+            target.add_child(item);
+        else
+            this._indicator.menu.addMenuItem(item);
     }
 }

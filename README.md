@@ -38,8 +38,8 @@ GNOME Spotlight information
 - A native preferences window for download, schedule, locale, and wallpaper
   behavior settings
 - A cached thumbnail of the active wallpaper in the panel popup
-- Popup controls for choosing an archive wallpaper, selecting a local image,
-  or checking Spotlight immediately
+- Compact title-bar controls with hover hints for choosing an archive
+  wallpaper, selecting a local image, or checking Spotlight immediately
 
 The primary desktop target is Ubuntu 26.04 with GNOME Shell 50 on Wayland. The
 GNOME extension uses only platform libraries provided by GNOME. The optional
@@ -250,11 +250,11 @@ The extension targets Ubuntu 26.04, GNOME Shell 50, and Wayland. It adds a
 lightweight information icon to the right side of the top panel, performs
 downloads asynchronously with libsoup, manages its own configurable refresh
 schedule, and uses `Gio.Settings` to apply the wallpaper without spawning
-external commands. The popup shows download status, a compact control bar,
-available metadata, a 16:9 thumbnail of the active wallpaper, and its filename.
-The controls can apply a different random image from the configured archive,
-open the desktop file chooser for a local image, or check for new Spotlight
-images immediately.
+external commands. The popup title places three compact icon controls to the
+right of **Spotlight**. Hovering over an icon identifies its action. Below the
+title, the popup shows download status, available metadata, a 16:9 thumbnail of
+the active wallpaper, and its filename. Content scrolls only when it would
+otherwise exceed the available desktop height.
 
 Open the preferences window from Extension Manager or from the command line:
 
@@ -281,21 +281,26 @@ only** performs no wallpaper action. Wallpaper changes update both
 
 The popup actions are independent of the configured post-check behavior:
 
-- **Random** applies a random JPEG, PNG, or WebP image from the configured
-  archive without using the network. When possible, it avoids the current
-  image.
-- **Choose…** uses the desktop file chooser to apply a local JPEG, PNG, or WebP
-  image. The selected file is not copied into the archive. If an adjacent
-  `<image-name>.json` file contains valid Spotlight metadata, that information
-  is shown in the popup.
-- **Check now** performs the same operation as an automatic check, including
-  the configured **After checking for wallpapers** action. It also restarts
-  the configured interval so another scheduled check does not immediately
-  follow it.
+- **Random wallpaper** applies a random JPEG, PNG, or WebP image from the
+  configured archive without using the network. When possible, it avoids the
+  current image.
+- **Choose a wallpaper** uses the desktop file chooser to apply a local JPEG,
+  PNG, or WebP image. It requests the configured archive folder as the starting
+  location, creating it when possible; it falls back to the XDG Pictures
+  directory and then the home directory. The desktop portal may ignore this
+  location hint. The selected file is not copied into the archive. If an
+  adjacent `<image-name>.json` file contains valid Spotlight metadata, that
+  information is shown in the popup.
+- **Check for new wallpapers** performs the same operation as an automatic
+  check, including the configured **After checking for wallpapers** action. It
+  also restarts the configured interval so another scheduled check does not
+  immediately follow it.
 
 Only one popup action or refresh can run at a time. The controls are disabled
-until the current operation finishes. Cancelling the file chooser leaves the
-wallpaper unchanged.
+until the current operation finishes. Enabled controls use the current Shell
+theme with full opacity and hover feedback; disabled controls become faint and
+lose their background without assuming a light or dark theme. Cancelling the
+file chooser leaves the wallpaper unchanged.
 
 Inspect its state:
 
@@ -322,29 +327,34 @@ and the last successfully loaded information remains visible.
    directory (the XDG Pictures directory under `SpotlightArchive` by default).
 3. Confirm both light and dark GNOME backgrounds change and inspect
    `~/.local/state/spotlight-desktop/current.json`.
-4. Open the popup, compare its text with `current.json`, and confirm the
-   control bar appears between the status and descriptive text and the
-   thumbnail appears between the descriptive text and filename.
-5. Click **Random** and confirm a different archive image is applied when more
-   than one is available.
-6. Click **Choose…**, select a supported local image outside the archive, and
-   confirm it is applied without being copied. Cancel a second selection and
-   confirm the wallpaper remains unchanged.
-7. Click **Check now**, confirm it follows **After checking for wallpapers**,
-   and confirm the next periodic check is measured from the manual check.
+4. Open the popup, compare its text with `current.json`, and confirm the three
+   icon controls appear to the right of **Spotlight**, each displays a hover
+   hint, and the thumbnail appears between the descriptive text and filename.
+5. Click **Random wallpaper** and confirm a different archive image is applied
+   when more than one is available; while it runs, confirm all controls visibly
+   dim.
+6. Click **Choose a wallpaper**, select a supported local image outside the
+   archive, and, when the portal honors folder hints, confirm the chooser starts
+   in **Archive folder**. Confirm the image is applied without being copied.
+   Cancel a second selection and confirm the wallpaper remains unchanged.
+7. Click **Check for new wallpapers** and confirm it follows the configured
+   **After checking for wallpapers** action. Confirm the next periodic check is
+   measured from the manual check.
 8. Set the interval to **Every 1 minute**, confirm a subsequent check, then
    restore **Every hour**.
 9. Replace `current.json` with another valid state file and confirm the open
    popup and thumbnail refresh.
 10. Temporarily rename the current image and confirm the popup remains usable
-   without a thumbnail.
-11. Disable the extension and confirm the indicator disappears:
+    without a thumbnail.
+11. Use metadata with a long description on a short display and confirm only
+    the content region scrolls while the title and status remain visible.
+12. Disable the extension and confirm the indicator disappears:
 
    ```bash
    gnome-extensions disable spotlight-desktop@mosesyyoung
    ```
 
-12. Enable it again and confirm only one indicator and one refresh operation
+13. Enable it again and confirm only one indicator and one refresh operation
    appear.
 
 For isolated Wayland testing on GNOME 49 or newer, GNOME documents a nested
@@ -420,8 +430,8 @@ spotlight-desktop/
 - [x] Refresh on enable and at configurable intervals without systemd
 - [x] Add extension preferences for locale and refresh behavior
 - [x] Show the current wallpaper thumbnail in the panel popup
-- [x] Add popup controls for random, manually selected, and immediate refresh
-  actions
+- [x] Add compact title-bar controls for random, manually selected, and
+  immediate refresh actions
 
 ## Development and testing
 

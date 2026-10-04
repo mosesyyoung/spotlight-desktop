@@ -241,7 +241,7 @@ class ResolutionSelectionTests(unittest.TestCase):
 
         self.assertEqual(metadata["uuid"], "spotlight-desktop@mosesyyoung")
         self.assertEqual(metadata["shell-version"], ["50"])
-        self.assertEqual(metadata["version"], 5)
+        self.assertEqual(metadata["version"], 6)
         self.assertEqual(
             metadata["settings-schema"],
             "org.gnome.shell.extensions.spotlight-desktop",
@@ -263,6 +263,11 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("org.freedesktop.portal.FileChooser", source)
         self.assertIn("this._startRefresh(true)", source)
         self.assertIn("this._operationPromise", source)
+        self.assertIn("_addHeader()", source)
+        self.assertIn("_attachTooltip(button, label)", source)
+        self.assertIn("new St.ScrollView", source)
+        self.assertIn("current_folder: new GLib.Variant", source)
+        self.assertIn("refresher.outputDirectory", source)
 
         downloader = (extension_directory / "spotlight.js").read_text(
             encoding="utf-8"
@@ -277,6 +282,18 @@ class ResolutionSelectionTests(unittest.TestCase):
         self.assertIn("applyRandomArchiveWallpaper", downloader)
         self.assertIn("applyLocalWallpaper", downloader)
         self.assertIn("imageFile.get_parent().get_child", downloader)
+        self.assertIn("get outputDirectory()", downloader)
+
+        stylesheet = (extension_directory / "stylesheet.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("control-button-enabled", stylesheet)
+        self.assertIn("control-button-disabled", stylesheet)
+        self.assertIn("spotlight-information-scroll-view", stylesheet)
+        self.assertIn("spotlight-information-content-item", stylesheet)
+        self.assertIn("padding-left: 0", stylesheet)
+        self.assertIn("padding-right: 0", stylesheet)
+        self.assertIn("spotlight-information-tooltip", stylesheet)
 
         prefs = (extension_directory / "prefs.js").read_text(encoding="utf-8")
         self.assertIn("ExtensionPreferences", prefs)

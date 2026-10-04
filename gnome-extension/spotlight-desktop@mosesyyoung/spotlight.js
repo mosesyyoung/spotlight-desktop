@@ -306,6 +306,10 @@ export class SpotlightRefresher {
         this._session.abort();
     }
 
+    get outputDirectory() {
+        return this._output;
+    }
+
     async applyRandomArchiveWallpaper(cancellable, excludedPath = null) {
         this._ensureDirectories();
         await this._loadHistory(cancellable);
